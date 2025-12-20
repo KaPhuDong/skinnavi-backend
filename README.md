@@ -1,68 +1,136 @@
-🚀 SkinNavi Backend – Onboarding Guide
+<div align="center">
 
-1. Tech Stack
+# 🚀 SkinNavi Backend
 
-NestJS (TypeScript)
+**Onboarding Guide** – Easy setup for new team members
 
-PostgreSQL
+</div>
 
-Prisma ORM
+---
 
-Docker & Docker Compose
+## 🧱 Tech Stack
 
-2. Prerequisites
+| Technology         | Usage                          |
+| ------------------ | ------------------------------ |
+| **NestJS**         | Backend framework (TypeScript) |
+| **PostgreSQL**     | Relational database            |
+| **Prisma ORM**     | Database ORM & migrations      |
+| **Docker**         | Database container             |
+| **Docker Compose** | Infrastructure orchestration   |
+
+---
+
+## ✅ Prerequisites
 
 Make sure you have installed:
 
-Node.js (v18+ recommended)
+- **Node.js** `v18+` (recommended)
+- **Docker** & **Docker Compose**
+- **Git**
 
-Docker & Docker Compose
+Check versions (optional):
 
-Git
+```bash
+node -v
+docker -v
+docker compose version
+```
 
-3. Clone the Repository
-   git clone https://github.com/your-org/skinnavi-backend.git
-   cd skinnavi-backend
+---
 
-4. Install Dependencies
-   npm install
+## 📥 Clone the Repository
 
-5. Environment Setup
+```bash
+git clone https://github.com/KaPhuDong/skinnavi-backend.git
+cd skinnavi-backend
+```
 
-Create a .env file based on the example:
+---
 
+## 📦 Install Dependencies
+
+```bash
+npm install
+```
+
+---
+
+## 🔐 Environment Setup
+
+Create a `.env` file from the example:
+
+```bash
 cp .env.example .env
+```
 
 Update values if needed.
 
-6. Start PostgreSQL with Docker
-   docker compose up -d db
+> ⚠️ **Do NOT commit `.env` files**
 
-7. Run Prisma Migration
-   npx prisma migrate dev
+---
 
-This will:
+## 🐘 Start PostgreSQL with Docker
 
-Apply database migrations
+Start only the database service:
 
-Generate Prisma Client
+```bash
+docker compose up -d db
+```
 
-8. Start the Backend Server
-   npm run start:dev
+---
+
+## 🗄️ Run Prisma Migration
+
+```bash
+npx prisma migrate dev
+```
+
+This command will:
+
+- Apply database migrations
+- Generate Prisma Client
+
+Optional – open Prisma Studio:
+
+```bash
+npx prisma studio
+```
+
+---
+
+## ▶️ Start the Backend Server
+
+```bash
+npm run start:dev
+```
 
 The API will be available at:
 
-http://localhost:3000
+👉 **[http://localhost:3000](http://localhost:3000)**
 
-9. Common Commands
-   npm run start:dev # Start server in development mode
-   npx prisma studio # Open Prisma Studio
-   npx prisma migrate dev # Apply migrations
+---
 
-10. Notes
+## 🧪 Common Commands
 
-Do NOT commit .env files
+```bash
+npm run start:dev        # Start server in development mode
+npx prisma studio        # Open Prisma Studio
+npx prisma migrate dev   # Apply migrations
+```
 
-Always run prisma migrate dev after pulling new changes
+---
 
-Use Docker only for infrastructure (database)
+## 📝 Notes
+
+- ❌ Do NOT commit `.env` files
+- 🔄 Always run `npx prisma migrate dev` after pulling new changes
+- 🐳 Docker is used **only for infrastructure** (PostgreSQL)
+- 💻 Backend runs **locally**, not inside Docker
+
+---
+
+<div align="center">
+
+✨ Happy Coding with **SkinNavi** ✨
+
+</div>
