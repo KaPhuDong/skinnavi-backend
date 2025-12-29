@@ -1,15 +1,116 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String         @id @default(uuid())
+  email           String         @unique
+  password_hash   String
+  full_name       String
+  avatar_url      String?
+  gender          Gender?      
+  date_of_birth   DateTime?
+  created_at      DateTime       @default(now())
+  
+  skin_analysis   SkinAnalysis[]
+  virtual_shelf   VirtualShelf[] 
+  chat_sessions   ChatSession[]
+}
+
+model SkinAnalysis {
+  id                String   @id @default(uuid())
+  user_id           String
+  image_url         String
+  result_skin_type  SkinType 
+  ad_results        Json     
+  consultation_note String?  @db.Text
+  skin_score        Float
+  created_at        DateTime @default(now())
+
+  user              User     @relation(fields: [user_id], references: [id])
+}
+
+model Product {
+  id              String         @id @default(uuid())
+  name            String
+  brand           String
+  category        String
+  description     String?        @db.Text
+  image_url       String?
+  ingredients     Json?
+  affiliate_link  String         
+  suitable_for    SkinType[]    
+  created_at      DateTime       @default(now())
+
+  virtual_items   VirtualShelf[]
+}
+
+model VirtualShelf {
+  id              String        @id @default(uuid())
+  user_id         String
+  product_id      String
+  purchase_date   DateTime?
+  expiry_date     DateTime?     
+  opened_date     DateTime?     
+  status          ProductStatus @default(IN_USE) 
+  notes           String?       @db.Text
+
+  user            User          @relation(fields: [user_id], references: [id])
+  product         Product       @relation(fields: [product_id], references: [id])
+}
+
+model ChatSession {
+  id          String        @id @default(uuid())
+  user_id     String
+  topic       String?
+  created_at  DateTime      @default(now())
+
+  user        User          @relation(fields: [user_id], references: [id])
+  messages    ChatMessage[]
+}
+
+model ChatMessage {
+  id          String      @id @default(uuid())
+  session_id  String
+  sender      SenderRole  
+  content     String      @db.Text
+  created_at  DateTime    @default(now())
+
+  session     ChatSession @relation(fields: [session_id], references: [id])
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum SenderRole {
+  USER
+  BOT
+}
+
+enum SkinType {
+  OILY
+  DRY
+  COMBINATION
+  SENSITIVE
+  NORMAL
+}
+
+enum ProductStatus {
+  IN_USE
+  EXPIRED
+  FINISHED
 }

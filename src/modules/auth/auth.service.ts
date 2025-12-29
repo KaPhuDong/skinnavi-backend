@@ -1,26 +1,37 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAuthDto } from './dto/create-auth.dto';
-import { UpdateAuthDto } from './dto/update-auth.dto';
+import { Injectable, ConflictException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { CreateAuthDto } from './dto/register.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
-  create(createAuthDto: CreateAuthDto) {
-    return 'This action adds a new auth';
-  }
+  constructor(private prisma: PrismaService) {}
 
-  findAll() {
-    return `This action returns all auth`;
-  }
+  async register(createAuthDto: CreateAuthDto) {
+    const { email, password, full_name, gender, avatar_url } = createAuthDto;
 
-  findOne(id: number) {
-    return `This action returns a #${id} auth`;
-  }
+    const userExists = await this.prisma.user.findUnique({
+      where: { email },
+    });
 
-  update(id: number, updateAuthDto: UpdateAuthDto) {
-    return `This action updates a #${id} auth`;
-  }
+    if (userExists) {
+      throw new ConflictException('Email already exists.');
+    }
 
-  remove(id: number) {
-    return `This action removes a #${id} auth`;
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        password_hash: hashedPassword,
+        full_name,
+        gender,
+        avatar_url,
+      },
+    });
+
+    const { password_hash: _password_hash, ...result } = user;
+    return result;
   }
 }
