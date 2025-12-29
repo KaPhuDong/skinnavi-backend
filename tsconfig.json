@@ -13,6 +13,9 @@
     "target": "ES2023",
     "sourceMap": true,
     "outDir": "./dist",
+    "paths": {
+      "@Constant/*": ["src/common/constants/*"]
+    },
     "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,
