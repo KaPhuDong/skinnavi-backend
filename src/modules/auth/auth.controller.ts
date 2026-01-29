@@ -20,7 +20,6 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({
     status: 201,
-    description: 'User successfully registered',
     schema: {
       allOf: [
         { $ref: getSchemaPath(SimpleResponse) },
@@ -29,15 +28,19 @@ export class AuthController {
             data: {
               type: 'object',
               properties: {
-                id: { type: 'string', format: 'uuid' },
-                email: { type: 'string' },
-                full_name: { type: 'string' },
-                avatar_url: { type: 'string' },
-                role: { type: 'string', example: 'USER' },
-                created_at: { type: 'string', format: 'date-time' },
+                user: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    email: { type: 'string' },
+                    full_name: { type: 'string' },
+                    role: { type: 'string' },
+                  },
+                },
+                accessToken: { type: 'string' },
+                refreshToken: { type: 'string' },
               },
             },
-            message: { type: 'string', example: 'Registered successfully.' },
           },
         },
       ],
