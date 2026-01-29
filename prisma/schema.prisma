@@ -30,6 +30,7 @@ model SkinAnalysis {
   result_skin_type  SkinType 
   ad_results        Json     
   consultation_note String?  @db.Text
+  concerns          Json     @default("{}")
   skin_score        Float
   created_at        DateTime @default(now())
 
