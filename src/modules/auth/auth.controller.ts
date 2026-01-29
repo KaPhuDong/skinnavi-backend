@@ -29,11 +29,12 @@ export class AuthController {
             data: {
               type: 'object',
               properties: {
-                id: { type: 'string' },
+                id: { type: 'string', format: 'uuid' },
                 email: { type: 'string' },
                 full_name: { type: 'string' },
-                gender: { type: 'string', enum: ['MALE', 'FEMALE'] },
                 avatar_url: { type: 'string' },
+                role: { type: 'string', example: 'USER' },
+                created_at: { type: 'string', format: 'date-time' },
               },
             },
             message: { type: 'string', example: 'Registered successfully.' },

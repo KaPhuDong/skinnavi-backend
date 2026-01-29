@@ -8,109 +8,199 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id              String         @id @default(uuid())
-  email           String         @unique
-  password_hash   String
-  full_name       String
-  avatar_url      String?
-  gender          Gender?      
-  date_of_birth   DateTime?
-  created_at      DateTime       @default(now())
-  
-  skin_analysis   SkinAnalysis[]
-  virtual_shelf   VirtualShelf[] 
-  chat_sessions   ChatSession[]
+model users {
+  id                     String                     @id @default(uuid()) @db.Uuid
+  email                  String                     @unique
+  password_hash          String
+  full_name              String?
+  avatar_url             String?
+  role                   user_role_enum             @default(USER)
+  created_at             DateTime                   @default(now())
+
+  skin_analyses           skin_analyses[]
+  user_package_subscriptions user_package_subscriptions[]
+  affiliate_click_logs    affiliate_click_logs[]
+  payments                payments[]
 }
 
-model SkinAnalysis {
-  id                String   @id @default(uuid())
-  user_id           String
-  image_url         String
-  result_skin_type  SkinType 
-  ad_results        Json     
-  consultation_note String?  @db.Text
-  skin_score        Float
-  created_at        DateTime @default(now())
+model skin_types {
+  id           String           @id @default(uuid()) @db.Uuid
+  code         skin_type_enum
 
-  user              User     @relation(fields: [user_id], references: [id])
+  skin_analyses skin_analyses[]
+  skincare_combos skincare_combos[]
 }
 
-model Product {
-  id              String         @id @default(uuid())
-  name            String
-  brand           String
-  category        String
-  description     String?        @db.Text
-  image_url       String?
-  ingredients     Json?
-  affiliate_link  String         
-  suitable_for    SkinType[]    
-  created_at      DateTime       @default(now())
+model skin_analyses {
+  id              String        @id @default(uuid()) @db.Uuid
+  user_id         String        @db.Uuid
+  skin_type_id    String        @db.Uuid
+  overall_score   Decimal?      @db.Decimal(5,2)
+  face_image_url  String?
+  created_at      DateTime      @default(now())
 
-  virtual_items   VirtualShelf[]
+  user            users         @relation(fields: [user_id], references: [id])
+  skin_type       skin_types    @relation(fields: [skin_type_id], references: [id])
+  metrics         skin_analysis_metrics[]
 }
 
-model VirtualShelf {
-  id              String        @id @default(uuid())
-  user_id         String
-  product_id      String
-  purchase_date   DateTime?
-  expiry_date     DateTime?     
-  opened_date     DateTime?     
-  status          ProductStatus @default(IN_USE) 
-  notes           String?       @db.Text
+model skin_analysis_metrics {
+  id                String            @id @default(uuid()) @db.Uuid
+  skin_analysis_id  String            @db.Uuid
+  metric_type       skin_metric_enum
+  score             Decimal?          @db.Decimal(5,2)
 
-  user            User          @relation(fields: [user_id], references: [id])
-  product         Product       @relation(fields: [product_id], references: [id])
+  skin_analysis     skin_analyses     @relation(fields: [skin_analysis_id], references: [id])
 }
 
-model ChatSession {
-  id          String        @id @default(uuid())
-  user_id     String
-  topic       String?
-  created_at  DateTime      @default(now())
+model affiliate_products {
+  id            String                @id @default(uuid()) @db.Uuid
+  name          String
+  usage_role    String?
+  display_price Decimal?              @db.Decimal(10,2)
+  affiliate_url String
+  image_url     String?
+  is_active     Boolean               @default(true)
 
-  user        User          @relation(fields: [user_id], references: [id])
-  messages    ChatMessage[]
+  combo_products combo_products[]
+  routine_steps  user_routine_steps[]
 }
 
-model ChatMessage {
-  id          String      @id @default(uuid())
-  session_id  String
-  sender      SenderRole  
-  content     String      @db.Text
-  created_at  DateTime    @default(now())
+model skincare_combos {
+  id            String                @id @default(uuid()) @db.Uuid
+  skin_type_id  String                @db.Uuid
+  combo_name    String
+  display_price Decimal?              @db.Decimal(10,2)
+  affiliate_url String
+  image_url     String?
+  is_active     Boolean               @default(true)
 
-  session     ChatSession @relation(fields: [session_id], references: [id])
+  skin_type      skin_types            @relation(fields: [skin_type_id], references: [id])
+  combo_products combo_products[]
+  allowed_packages package_allowed_combos[]
+  subscriptions  user_package_subscriptions[]
 }
 
-enum Gender {
-  MALE
-  FEMALE
+model combo_products {
+  id          String              @id @default(uuid()) @db.Uuid
+  combo_id    String              @db.Uuid
+  product_id  String              @db.Uuid
+  step_order  Int
+
+  combo       skincare_combos     @relation(fields: [combo_id], references: [id])
+  product     affiliate_products @relation(fields: [product_id], references: [id])
 }
 
-enum OrderStatus {
-  PENDING
-  COMPLETED
-  CANCELLED
+model routine_packages {
+  id             String                     @id @default(uuid()) @db.Uuid
+  package_name   String
+  description    String
+  duration_days  Int
+  price          Decimal                    @db.Decimal(10,2)
+
+  allowed_combos package_allowed_combos[]
+  subscriptions  user_package_subscriptions[]
 }
 
-enum SenderRole {
+model package_allowed_combos {
+  id                 String             @id @default(uuid()) @db.Uuid
+  routine_package_id String             @db.Uuid
+  combo_id           String             @db.Uuid
+
+  routine_package   routine_packages   @relation(fields: [routine_package_id], references: [id])
+  combo             skincare_combos    @relation(fields: [combo_id], references: [id])
+}
+
+model user_package_subscriptions {
+  id                 String             @id @default(uuid()) @db.Uuid
+  user_id            String             @db.Uuid
+  routine_package_id String             @db.Uuid
+  selected_combo_id  String             @db.Uuid
+  start_date         DateTime           @db.Date
+  end_date           DateTime           @db.Date
+  created_at         DateTime           @default(now())
+
+  user               users              @relation(fields: [user_id], references: [id])
+  routine_package    routine_packages   @relation(fields: [routine_package_id], references: [id])
+  selected_combo     skincare_combos    @relation(fields: [selected_combo_id], references: [id])
+  routines           user_routines[]
+  payments           payments[]
+}
+
+model user_routines {
+  id                             String                   @id @default(uuid()) @db.Uuid
+  user_package_subscription_id   String                   @db.Uuid
+  routine_time                   routine_time_enum
+
+  subscription                   user_package_subscriptions @relation(fields: [user_package_subscription_id], references: [id])
+  steps                          user_routine_steps[]
+  daily_logs                     routine_daily_logs[]
+}
+
+model user_routine_steps {
+  id              String              @id @default(uuid()) @db.Uuid
+  user_routine_id String              @db.Uuid
+  step_order      Int
+  instruction     String?
+  product_id      String?             @db.Uuid
+
+  user_routine    user_routines       @relation(fields: [user_routine_id], references: [id])
+  product         affiliate_products? @relation(fields: [product_id], references: [id])
+}
+
+model routine_daily_logs {
+  id              String          @id @default(uuid()) @db.Uuid
+  user_routine_id String          @db.Uuid
+  log_date        DateTime        @db.Date
+  is_completed    Boolean         @default(false)
+
+  user_routine    user_routines   @relation(fields: [user_routine_id], references: [id])
+}
+
+model affiliate_click_logs {
+  id          String    @id @default(uuid()) @db.Uuid
+  user_id     String?   @db.Uuid
+  target_type String?
+  target_id   String?   @db.Uuid
+  clicked_at  DateTime  @default(now())
+
+  user        users?    @relation(fields: [user_id], references: [id])
+}
+
+model payments {
+  id              String    @id @default(uuid()) @db.Uuid
+  user_id         String    @db.Uuid
+  subscription_id String    @db.Uuid
+  amount          Decimal   @db.Decimal(10,2)
+  status          String?
+  created_at      DateTime  @default(now())
+
+  user            users                     @relation(fields: [user_id], references: [id])
+  subscription    user_package_subscriptions @relation(fields: [subscription_id], references: [id])
+}
+
+enum user_role_enum {
   USER
-  BOT
+  ADMIN
 }
 
-enum SkinType {
-  OILY
+enum skin_type_enum {
+  NORMAL
   DRY
   COMBINATION
   SENSITIVE
-  NORMAL
+  OILY
 }
 
-enum ProductStatus {
-  IN_USE
-  EXPIRED
-  FINISHED
+enum skin_metric_enum {
+  PORES
+  ACNE
+  DARK_CIRCLES
+  DARK_SPOTS
+  WRINKLES
+}
+
+enum routine_time_enum {
+  MORNING
+  EVENING
 }

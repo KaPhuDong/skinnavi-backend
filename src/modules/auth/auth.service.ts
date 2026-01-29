@@ -8,9 +8,9 @@ export class AuthService {
   constructor(private prisma: PrismaService) {}
 
   async register(createAuthDto: CreateAuthDto) {
-    const { email, password, full_name, gender, avatar_url } = createAuthDto;
+    const { email, password, full_name, avatar_url } = createAuthDto;
 
-    const userExists = await this.prisma.user.findUnique({
+    const userExists = await this.prisma.users.findUnique({
       where: { email },
     });
 
@@ -21,12 +21,11 @@ export class AuthService {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const user = await this.prisma.user.create({
+    const user = await this.prisma.users.create({
       data: {
         email,
         password_hash: hashedPassword,
         full_name,
-        gender,
         avatar_url,
       },
     });

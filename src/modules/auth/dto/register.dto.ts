@@ -4,9 +4,7 @@ import {
   IsOptional,
   IsString,
   MinLength,
-  IsEnum,
 } from 'class-validator';
-import { Gender } from '../../../../generated/prisma';
 
 export class CreateAuthDto {
   @IsEmail()
@@ -19,10 +17,6 @@ export class CreateAuthDto {
   @IsString()
   @IsNotEmpty()
   full_name: string;
-
-  @IsOptional()
-  @IsEnum(Gender)
-  gender?: Gender;
 
   @IsOptional()
   @IsString()
