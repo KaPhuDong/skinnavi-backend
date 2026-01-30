@@ -114,8 +114,11 @@ The API will be available at:
 
 ```bash
 npm run start:dev        # Start server in development mode
-npx prisma studio        # Open Prisma Studio
-npx prisma migrate dev   # Apply migrations
+npx prisma:studio        # Open Prisma Studio
+npm run prisma:migrate   # Apply migrations
+npm run db:reset         # Reset database (drop + migrate)
+npm run db:seed          # Seed data
+npm run db:reset:seed   # Reset DB + seed it again from scratch
 ```
 
 ---
