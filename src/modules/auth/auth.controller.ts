@@ -7,7 +7,7 @@ import {
   ApiExtraModels,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { CreateAuthDto } from './dto/index';
+import { CreateAuthDto, LoginDto } from './dto/index';
 import { SimpleResponse } from '../../common/dtos/index';
 
 @ApiTags('auth')
@@ -44,7 +44,47 @@ export class AuthController {
     },
   })
   async register(@Body() createAuthDto: CreateAuthDto) {
-    const result = await this.authService.register(createAuthDto);
-    return new SimpleResponse(result, 'Registered successfully.');
+    await this.authService.register(createAuthDto);
+    return new SimpleResponse(null, 'Registered successfully.', 201);
+  }
+
+  @Post('login')
+  @ApiOperation({ summary: 'Login to the system' })
+  @ApiResponse({
+    status: 200,
+    description: 'Login successful',
+    schema: {
+      allOf: [
+        { $ref: getSchemaPath(SimpleResponse) },
+        {
+          properties: {
+            data: {
+              type: 'object',
+              properties: {
+                user: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    email: { type: 'string' },
+                    full_name: { type: 'string' },
+                    role: { type: 'string' },
+                  },
+                },
+                accessToken: { type: 'string' },
+                refreshToken: { type: 'string' },
+              },
+            },
+          },
+        },
+      ],
+    },
+  })
+  async login(@Body() loginDto: LoginDto) {
+    const result = await this.authService.login(loginDto);
+    return new SimpleResponse(
+      { accessToken: result.accessToken },
+      'Login successful.',
+      200,
+    );
   }
 }
