@@ -19,8 +19,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "db:reset": "prisma migrate reset --force",
-    "db:seed": "prisma generate && ts-node prisma/seed.ts",
-    "db:reset:seed": "prisma migrate reset --force && prisma generate && ts-node prisma/seed.ts"
+    "db:seed": "prisma generate && ts-node prisma/seed/index.ts",
+    "db:reset:seed": "prisma migrate reset --force && prisma generate && ts-node prisma/seed/index.ts"
   },
   "lint-staged": {
     "*.{js,ts}": [
