@@ -1,3 +1,4 @@
+// src/modules/routines/dto/create-routine.dto.ts
 import { IsUUID } from 'class-validator';
 
 export class CreateRoutineDto {
@@ -8,5 +9,8 @@ export class CreateRoutineDto {
   skinAnalysisId: string;
 
   @IsUUID()
-  userPackageSubscriptionId: string;
+  routinePackageId: string;
+
+  @IsUUID()
+  comboId: string;
 }

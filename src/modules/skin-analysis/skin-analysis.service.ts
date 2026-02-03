@@ -30,15 +30,10 @@ export class SkinAnalysisService {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
-  /**
-   * 👉 Chỉ phân tích + lưu skin_analyses + skin_analysis_metrics
-   * ❌ KHÔNG tạo routine ở đây
-   */
   async analyzeImage(
     imageUrl: string,
     userId: string,
   ): Promise<{ analysisId: string; result: any }> {
-    // 👉 Lấy combo để AI gợi ý
     const combos = await this.prisma.skincare_combos.findMany({
       where: { is_active: true },
       select: { id: true, combo_name: true },
@@ -95,6 +90,7 @@ export class SkinAnalysisService {
         user_id: userId,
         skin_type_id: skinType.id,
         overall_score: result.skinScore,
+        overall_comment: result.overallComment, // ✅ LƯU COMMENT
         face_image_url: imageUrl,
       },
     });
@@ -128,9 +124,10 @@ export class SkinAnalysisService {
 
     if (
       !parsed.skinType ||
-      !parsed.skinScore ||
+      parsed.skinScore === undefined ||
       !parsed.concerns ||
-      !parsed.recommendedCombos
+      !parsed.recommendedCombos ||
+      !parsed.overallComment
     ) {
       throw new BadRequestException('Missing fields in AI response');
     }
@@ -173,10 +170,12 @@ Return ONLY valid JSON:
     "darkCircles": number,
     "darkSpots": number
   },
+  "overallComment": string,
   "recommendedCombos": ["uuid1", "uuid2"]
 }
 
 Rules:
+- overallComment must be a short, friendly summary of the user's skin condition.
 - recommendedCombos must be array of skincare_combos UUIDs from the list below.
 - Do NOT include routine, steps, or products.
 - Do NOT include extra fields.

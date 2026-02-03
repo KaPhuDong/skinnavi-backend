@@ -25,52 +25,56 @@ export class RoutinesService {
   async createRoutine(params: {
     userId: string;
     skinAnalysisId: string;
-    userPackageSubscriptionId: string;
+    routinePackageId: string;
+    comboId: string;
   }) {
-    const { userId, skinAnalysisId, userPackageSubscriptionId } = params;
+    const { userId, skinAnalysisId, routinePackageId, comboId } = params;
 
-    // 👉 1. Lấy analysis + metrics
+    // 1. Check skin analysis
     const analysis = await this.prisma.skin_analyses.findFirst({
       where: { id: skinAnalysisId, user_id: userId },
       include: { metrics: true, skin_type: true },
     });
+    if (!analysis) throw new NotFoundException('Skin analysis not found');
 
-    if (!analysis) {
-      throw new NotFoundException('Skin analysis not found');
-    }
+    // 2. Check package
+    const pkg = await this.prisma.routine_packages.findUnique({
+      where: { id: routinePackageId },
+    });
+    if (!pkg) throw new NotFoundException('Package not found');
 
-    // 👉 2. Lấy subscription + combo + products
-    const subscription = await this.prisma.user_package_subscriptions.findFirst(
-      {
-        where: { id: userPackageSubscriptionId, user_id: userId },
-        include: {
-          selected_combo: {
-            include: {
-              combo_products: {
-                include: { product: true },
-              },
-            },
-          },
-        },
+    // 3. Check combo + products
+    const combo = await this.prisma.skincare_combos.findUnique({
+      where: { id: comboId },
+      include: {
+        combo_products: { include: { product: true } },
       },
-    );
-
-    if (!subscription) {
-      throw new NotFoundException('Subscription not found');
+    });
+    if (!combo || !combo.combo_products.length) {
+      throw new BadRequestException('Combo has no products');
     }
 
-    const comboProducts = subscription.selected_combo.combo_products;
+    // 4. Create subscription
+    const start = new Date();
+    const end = new Date(start);
+    end.setDate(end.getDate() + pkg.duration_days);
 
-    if (!comboProducts.length) {
-      throw new BadRequestException('Selected combo has no products');
-    }
+    const subscription = await this.prisma.user_package_subscriptions.create({
+      data: {
+        user_id: userId,
+        routine_package_id: routinePackageId,
+        selected_combo_id: comboId,
+        start_date: start,
+        end_date: end,
+      },
+    });
 
-    // 👉 3. Build AI input
+    // 5. Build prompt
     const metricsText = analysis.metrics
       .map((m) => `${m.metric_type}: ${m.score}`)
       .join(', ');
 
-    const comboProductsText = comboProducts
+    const comboProductsText = combo.combo_products
       .map(
         (cp) =>
           `- ${cp.product.name} (id: ${cp.product.id}, role: ${cp.product.usage_role ?? 'N/A'})`,
@@ -78,37 +82,37 @@ export class RoutinesService {
       .join('\n');
 
     const prompt = `
-        You are an AI skincare routine expert.
-        Based on this data, generate a DAILY skincare routine.
+  You are an AI skincare routine expert.
+  Based on this data, generate a DAILY skincare routine.
 
-        Skin type: ${analysis.skin_type.code}
-        Metrics: ${metricsText}
+  Skin type: ${analysis.skin_type.code}
+  Metrics: ${metricsText}
 
-        Selected combo products:
-        ${comboProductsText}
+  Selected combo products:
+  ${comboProductsText}
 
-        Return ONLY valid JSON:
+  Return ONLY valid JSON:
 
-        {
-        "morning": {
-            "steps": [
-            { "step": number, "title": string, "howTo": string, "productId": "uuid" }
-            ]
-        },
-        "evening": {
-            "steps": [
-            { "step": number, "title": string, "howTo": string, "productId": "uuid" }
-            ]
-        }
-        }
+  {
+    "morning": {
+      "steps": [
+        { "step": number, "title": string, "howTo": string, "productId": "uuid" }
+      ]
+    },
+    "evening": {
+      "steps": [
+        { "step": number, "title": string, "howTo": string, "productId": "uuid" }
+      ]
+    }
+  }
 
-        Rules:
-        - Use ONLY productId from the list above.
-        - step must be number.
-        - No markdown, no explanation.
-        `;
+  Rules:
+  - Use ONLY productId from the list above.
+  - step must be number.
+  - No markdown, no explanation.
+  `;
 
-    // 👉 4. Gọi AI
+    // 6. Call Gemini
     const res = await this.ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -118,9 +122,7 @@ export class RoutinesService {
     const raw =
       (res as any).text ?? res.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    if (!raw) {
-      throw new BadRequestException('AI did not return JSON');
-    }
+    if (!raw) throw new BadRequestException('AI did not return JSON');
 
     const cleaned = raw
       .replace(/^```json\s*/i, '')
@@ -138,9 +140,9 @@ export class RoutinesService {
       throw new BadRequestException('AI response missing morning/evening');
     }
 
-    const validProductIds = comboProducts.map((cp) => cp.product.id);
+    const validProductIds = combo.combo_products.map((cp) => cp.product.id);
 
-    // 👉 5. Save MORNING routine
+    // 7. Create MORNING routine
     const morning = await this.prisma.user_routines.create({
       data: {
         user_package_subscription_id: subscription.id,
@@ -150,9 +152,7 @@ export class RoutinesService {
 
     for (const step of parsed.morning.steps) {
       if (!validProductIds.includes(step.productId)) {
-        throw new BadRequestException(
-          `Invalid productId in morning: ${step.productId}`,
-        );
+        throw new BadRequestException(`Invalid productId: ${step.productId}`);
       }
 
       await this.prisma.user_routine_steps.create({
@@ -165,7 +165,7 @@ export class RoutinesService {
       });
     }
 
-    // 👉 6. Save EVENING routine
+    // 8. Create EVENING routine
     const evening = await this.prisma.user_routines.create({
       data: {
         user_package_subscription_id: subscription.id,
@@ -175,9 +175,7 @@ export class RoutinesService {
 
     for (const step of parsed.evening.steps) {
       if (!validProductIds.includes(step.productId)) {
-        throw new BadRequestException(
-          `Invalid productId in evening: ${step.productId}`,
-        );
+        throw new BadRequestException(`Invalid productId: ${step.productId}`);
       }
 
       await this.prisma.user_routine_steps.create({
@@ -191,14 +189,12 @@ export class RoutinesService {
     }
 
     return {
-      morningId: morning.id,
-      eveningId: evening.id,
+      subscriptionId: subscription.id,
+      morningRoutineId: morning.id,
+      eveningRoutineId: evening.id,
     };
   }
 
-  /**
-   * 👉 Lấy routine của user
-   */
   async getRoutineByUser(userId: string) {
     return this.prisma.user_routines.findMany({
       where: {

@@ -35,6 +35,7 @@ model skin_analyses {
   user_id         String        @db.Uuid
   skin_type_id    String        @db.Uuid
   overall_score   Decimal?      @db.Decimal(5,2)
+  overall_comment  String?       @db.Text
   face_image_url  String?
   created_at      DateTime      @default(now())
 

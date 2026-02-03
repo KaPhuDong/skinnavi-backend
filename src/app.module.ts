@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProductsModule } from './modules/products/products.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { SkinAnalysisModule } from './modules/skin-analysis/skin-analysis.module';
+import { RoutinesModule } from './modules/routine/routines.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SkinAnalysisModule } from './modules/skin-analysis/skin-analysis.module
     ProductsModule,
     UploadModule,
     SkinAnalysisModule,
+    RoutinesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
