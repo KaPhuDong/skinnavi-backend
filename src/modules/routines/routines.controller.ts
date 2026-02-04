@@ -1,7 +1,8 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Post, Body, Get, Param, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoutinesService } from './routines.service';
-import { SimpleResponse } from '../../common/dtos/index';
+import { CreateRoutineDto } from './dto/create-routine.dto';
+import { SimpleResponse } from '../../common/dtos';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('routines')
@@ -11,14 +12,17 @@ export class RoutinesController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
-  @Get('packages')
-  @ApiOperation({ summary: 'Get 3 routine packages for FE display' })
-  async getPackages() {
-    const result = await this.routinesService.getRoutinePackages();
-    return new SimpleResponse(
-      result,
-      'Fetched routine packages successfully',
-      200,
-    );
+  @Post()
+  async create(@Body() dto: CreateRoutineDto) {
+    const data = await this.routinesService.createRoutine(dto);
+    return new SimpleResponse(data, 'Routine created successfully', 201);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Get(':userId')
+  async getByUser(@Param('userId') userId: string) {
+    const data = await this.routinesService.getRoutineByUser(userId);
+    return new SimpleResponse(data, 'Get routine by user', 200);
   }
 }
