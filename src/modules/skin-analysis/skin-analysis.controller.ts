@@ -28,12 +28,13 @@ export class SkinAnalysisController {
   async analyze(
     @Body() dto: AnalyzeSkinDto,
     @GetUser('userId') userId: string,
-  ): Promise<SimpleResponse<{ analysisId: string; result: unknown }>> {
+  ): Promise<SimpleResponse<{ analysisId: string | null; result: unknown }>> {
     const { analysisId, result } = await this.skinAnalysisService.analyzeImage(
       dto.imageUrl,
       userId,
     );
-    return new SimpleResponse(
+
+    return new SimpleResponse<{ analysisId: string | null; result: unknown }>(
       { analysisId, result },
       'Analysis completed successfully.',
       200,
