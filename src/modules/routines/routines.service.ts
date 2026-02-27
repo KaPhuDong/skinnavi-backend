@@ -110,7 +110,12 @@ export class RoutinesService {
     const res = await this.ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { responseMimeType: 'application/json', temperature: 0.2 },
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0,
+        topP: 0.1,
+        topK: 1,
+      },
     });
 
     const raw =

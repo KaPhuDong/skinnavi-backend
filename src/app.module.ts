@@ -9,6 +9,7 @@ import { RoutinesModule } from './modules/routines/routines.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { SkinAnalysisModule } from './modules/skin-analysis/skin-analysis.module';
 import { RoutinePackagesModule } from './modules/routine-packages/routine-packages.module';
+import { CombosModule } from './modules/combos/combos.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { RoutinePackagesModule } from './modules/routine-packages/routine-packag
     PrismaModule,
     AuthModule,
     ProductsModule,
+    CombosModule,
     UploadModule,
     SkinAnalysisModule,
     RoutinePackagesModule,

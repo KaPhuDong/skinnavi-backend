@@ -2,24 +2,21 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI, createUserContent } from '@google/genai';
 import { PrismaService } from '../../prisma/prisma.service';
-import { skin_metric_enum } from '@prisma/client';
+import { Prisma, skin_metric_enum } from '@prisma/client';
+import crypto from 'crypto';
+import { AIAnalysisResult, analysisResultSchema } from './skin-analysis.schema';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
-
-const CONCERN_TO_METRIC: Record<string, skin_metric_enum> = {
-  pores: skin_metric_enum.PORES,
-  acnes: skin_metric_enum.ACNE,
-  darkCircles: skin_metric_enum.DARK_CIRCLES,
-  darkSpots: skin_metric_enum.DARK_SPOTS,
-};
 
 @Injectable()
 export class SkinAnalysisService {
   private ai: GoogleGenAI;
+  private readonly logger = new Logger(SkinAnalysisService.name);
 
   constructor(
     private configService: ConfigService,
@@ -30,29 +27,46 @@ export class SkinAnalysisService {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
-  async analyzeImage(
-    imageUrl: string,
-    userId: string,
-  ): Promise<{ analysisId: string; result: any }> {
-    const combos = await this.prisma.skincare_combos.findMany({
-      where: { is_active: true },
-      select: { id: true, combo_name: true },
+  async analyzeImage(imageUrl: string, userId: string) {
+    const imageBase64 = await this.fetchImageAsBase64(imageUrl);
+    const mimeType = inferMimeType(imageUrl);
+
+    const imageHash = crypto
+      .createHash('sha256')
+      .update(imageBase64)
+      .digest('hex');
+
+    const cached = await this.prisma.skin_analyses.findFirst({
+      where: { image_hash: imageHash },
+      include: { metrics: true, skin_type: true },
     });
 
-    if (!combos.length) {
-      throw new BadRequestException('No skincare combos in DB.');
-    }
+    if (cached) return this.mapAnalysisToResponse(cached);
+
+    const combos = await this.prisma.skincare_combos.findMany({
+      where: { is_active: true },
+      select: { id: true, combo_name: true, skin_type_id: true },
+    });
 
     const comboListText = combos
       .map((c) => `- id: ${c.id}, name: ${c.combo_name}`)
       .join('\n');
 
-    const prompt = buildAnalysisPrompt(comboListText);
+    const last = await this.prisma.skin_analyses.findFirst({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+      include: { metrics: true, skin_type: true },
+    });
 
-    const imageBase64 = await this.fetchImageAsBase64(imageUrl);
-    const mimeType = inferMimeType(imageUrl);
+    const previousAnalysisText = this.buildPreviousAnalysisText(last);
 
-    const response = await this.ai.models.generateContent({
+    const prompt = buildAnalysisPrompt(
+      comboListText,
+      imageUrl,
+      previousAnalysisText,
+    );
+
+    const aiRes = await this.ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: createUserContent([
         { inlineData: { mimeType, data: imageBase64 } },
@@ -60,47 +74,105 @@ export class SkinAnalysisService {
       ]),
       config: {
         responseMimeType: 'application/json',
-        temperature: 0.2,
+        temperature: 0,
+        topP: 0.1,
+        topK: 1,
       },
     });
 
-    const text =
-      (response as { text?: string }).text ??
-      response.candidates?.[0]?.content?.parts?.[0]?.text ??
-      null;
+    const text = aiRes.text ?? aiRes.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    if (!text || typeof text !== 'string') {
-      throw new BadRequestException('AI did not return valid JSON');
+    if (!text) throw new BadRequestException('AI returned empty');
+
+    const result = this.parseAIResponse(text);
+    result.imageUrl = imageUrl;
+
+    if (!result.isValidImage) {
+      return { analysisId: null, result };
     }
-
-    const result = this.parseAnalysisResult(text);
 
     const skinType = await this.prisma.skin_types.findFirst({
       where: { code: result.skinType },
     });
 
-    if (!skinType) {
-      throw new NotFoundException(
-        `Skin type "${result.skinType}" not found in DB.`,
-      );
-    }
+    if (!skinType) throw new NotFoundException('Skin type not found');
 
-    const analysis = await this.prisma.skin_analyses.create({
-      data: {
-        user_id: userId,
-        skin_type_id: skinType.id,
-        overall_score: result.skinScore,
-        overall_comment: result.overallComment, // ✅ LƯU COMMENT
-        face_image_url: imageUrl,
-      },
+    const recommendedCombos = combos
+      .filter((c) => c.skin_type_id === skinType.id)
+      .slice(0, 3)
+      .map((c) => c.id);
+
+    const analysis = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.skin_analyses.create({
+        data: {
+          user_id: userId,
+          skin_type_id: skinType.id,
+          overall_score: new Prisma.Decimal(result.overallScore),
+          overall_comment: result.overallComment,
+          face_image_url: imageUrl,
+          image_hash: imageHash,
+        },
+      });
+
+      await tx.skin_analysis_metrics.createMany({
+        data: Object.entries(result.metrics).map(([type, score]) => ({
+          skin_analysis_id: created.id,
+          metric_type: type as skin_metric_enum,
+          score: new Prisma.Decimal(Number(score)),
+        })),
+      });
+
+      return created;
     });
 
-    await this.createMetrics(analysis.id, result.concerns);
-
-    return { analysisId: analysis.id, result };
+    return {
+      analysisId: analysis.id,
+      result: {
+        ...result,
+        recommendedCombos,
+      },
+    };
   }
 
-  private async fetchImageAsBase64(imageUrl: string): Promise<string> {
+  private buildPreviousAnalysisText(last: any) {
+    if (!last) return 'NO_PREVIOUS_ANALYSIS';
+
+    const metrics = Object.fromEntries(
+      last.metrics.map((m) => [m.metric_type, Number(m.score)]),
+    );
+
+    return `
+PREVIOUS ANALYSIS:
+
+skinType: ${last.skin_type.code}
+overallScore: ${Number(last.overall_score)}
+
+metrics:
+${Object.entries(metrics)
+  .map(([k, v]) => `- ${k}: ${v}`)
+  .join('\n')}
+`;
+  }
+
+  private mapAnalysisToResponse(analysis: any) {
+    const metrics = Object.fromEntries(
+      analysis.metrics.map((m) => [m.metric_type, Number(m.score)]),
+    );
+
+    return {
+      analysisId: analysis.id,
+      result: {
+        skinType: analysis.skin_type.code,
+        overallScore: Number(analysis.overall_score),
+        metrics,
+        overallComment: analysis.overall_comment,
+        recommendedCombos: [],
+        isValidImage: true,
+      },
+    };
+  }
+
+  private async fetchImageAsBase64(imageUrl: string) {
     const res = await fetch(imageUrl);
     if (!res.ok) {
       throw new BadRequestException(`Cannot fetch image: ${res.status}`);
@@ -109,79 +181,93 @@ export class SkinAnalysisService {
     return Buffer.from(buf).toString('base64');
   }
 
-  private parseAnalysisResult(raw: string): any {
-    const cleaned = raw
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```\s*$/i, '')
+  private parseAIResponse(text: string): AIAnalysisResult {
+    const cleaned = text
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
       .trim();
+    const json = JSON.parse(cleaned);
+    const parsed = analysisResultSchema.safeParse(json);
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      throw new BadRequestException('AI returned invalid JSON');
+    if (!parsed.success) {
+      throw new BadRequestException('AI response validation failed');
     }
 
-    if (
-      !parsed.skinType ||
-      parsed.skinScore === undefined ||
-      !parsed.concerns ||
-      !parsed.recommendedCombos ||
-      !parsed.overallComment
-    ) {
-      throw new BadRequestException('Missing fields in AI response');
-    }
-
-    return parsed;
-  }
-
-  private async createMetrics(
-    skinAnalysisId: string,
-    concerns: Record<string, number>,
-  ): Promise<void> {
-    const entries = Object.entries(concerns).filter(([key, value]) => {
-      return typeof value === 'number' && key in CONCERN_TO_METRIC;
-    }) as [string, number][];
-
-    if (!entries.length) return;
-
-    await this.prisma.skin_analysis_metrics.createMany({
-      data: entries.map(([key, score]) => ({
-        skin_analysis_id: skinAnalysisId,
-        metric_type: CONCERN_TO_METRIC[key],
-        score: Number(score),
-      })),
-    });
+    return parsed.data;
   }
 }
 
-function buildAnalysisPrompt(comboListText: string): string {
+export function buildAnalysisPrompt(
+  comboListText: string,
+  imageUrl: string,
+  previousAnalysis: string,
+): string {
   return `
-You are an AI dermatology expert.
+You are a professional AI skin analysis system.
 
-Return ONLY valid JSON:
+IMAGE URL: ${imageUrl}
 
-{
-  "skinType": "OILY|DRY|COMBINATION|SENSITIVE|NORMAL",
-  "skinScore": number,
-  "concerns": {
-    "pores": number,
-    "acnes": number,
-    "darkCircles": number,
-    "darkSpots": number
-  },
-  "overallComment": string,
-  "recommendedCombos": ["uuid1", "uuid2"]
-}
+====================
+TEMPORAL CONSISTENCY
+====================
+
+${previousAnalysis}
 
 Rules:
-- overallComment must be a short, friendly summary of the user's skin condition.
-- recommendedCombos must be array of skincare_combos UUIDs from the list below.
-- Do NOT include routine, steps, or products.
-- Do NOT include extra fields.
 
-Available combos:
+- Previous analysis is for consistency only
+- The new image is the primary source of truth
+- DO NOT drastically change scores without clear visible reason
+- Score difference should normally NOT exceed 15 points
+- DO NOT randomly change skinType
+
+====================
+IMAGE VALIDATION
+====================
+
+Reject if:
+- Face < 60%
+- Blurry
+- Too dark / overexposed
+- Multiple faces
+- Obstructed
+
+If invalid → return:
+
+{
+  "isValidImage": false,
+  "imageUrl": "${imageUrl}",
+  "message": "reason",
+  "guidelines": []
+}
+
+====================
+SKIN ANALYSIS
+====================
+
+If valid → return:
+
+{
+  "isValidImage": true,
+  "imageUrl": "${imageUrl}",
+  "skinType": "NORMAL | DRY | COMBINATION | SENSITIVE | OILY",
+  "overallScore": number,
+  "metrics": {
+    "PORES": number,
+    "ACNE": number,
+    "DARK_CIRCLES": number,
+    "DARK_SPOTS": number
+  },
+  "overallComment": string,
+  "recommendedCombos": ["uuid"]
+}
+
+====================
+AVAILABLE COMBOS
+====================
 ${comboListText}
+
+Return JSON only.
 `;
 }
 
