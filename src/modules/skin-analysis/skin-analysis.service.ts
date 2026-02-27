@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI, createUserContent } from '@google/genai';
@@ -15,6 +16,7 @@ const GEMINI_MODEL = 'gemini-2.5-flash';
 @Injectable()
 export class SkinAnalysisService {
   private ai: GoogleGenAI;
+  private readonly logger = new Logger(SkinAnalysisService.name);
 
   constructor(
     private configService: ConfigService,
@@ -25,7 +27,10 @@ export class SkinAnalysisService {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
-  async analyzeImage(imageUrl: string, userId: string) {
+  async analyzeImage(
+    imageUrl: string,
+    userId: string,
+  ): Promise<{ analysisId: string | null; result: unknown }> {
     const imageBase64 = await this.fetchImageAsBase64(imageUrl);
     const mimeType = inferMimeType(imageUrl);
 
@@ -203,21 +208,41 @@ export class SkinAnalysisService {
   }
 
   private parseAIResponse(text: string): AIAnalysisResult {
+    this.logger.debug('RAW AI TEXT:');
+    this.logger.debug(text);
+
+    if (!text || typeof text !== 'string') {
+      throw new BadRequestException('AI returned empty response');
+    }
+
+    const cleaned = text
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+
     let json: unknown;
 
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(cleaned);
     } catch {
+      this.logger.error('JSON.parse failed');
+      this.logger.debug(cleaned);
       throw new BadRequestException('AI returned invalid JSON');
     }
 
-    const result = analysisResultSchema.safeParse(json);
+    const parseResult = analysisResultSchema.safeParse(json);
 
-    if (!result.success) {
+    if (parseResult.success === false) {
+      this.logger.error('Zod validation failed');
+
+      this.logger.debug(JSON.stringify(parseResult.error.format(), null, 2));
+
+      this.logger.debug(JSON.stringify(json, null, 2));
+
       throw new BadRequestException('AI response validation failed');
     }
 
-    return result.data;
+    return parseResult.data;
   }
 
   private async callAIWithRetry(payload: any, retries = 2) {
@@ -290,8 +315,7 @@ If the image is valid → return ONLY:
     "PORES": number,
     "ACNE": number,
     "DARK_CIRCLES": number,
-    "DARK_SPOTS": number,
-    "WRINKLES": number
+    "DARK_SPOTS": number
   },
   "overallComment": string,
   "recommendedCombos": ["uuid1", "uuid2"]

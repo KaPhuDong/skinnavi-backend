@@ -5,7 +5,6 @@ export const metricSchema = z.object({
   ACNE: z.number().int().min(0).max(100),
   DARK_CIRCLES: z.number().int().min(0).max(100),
   DARK_SPOTS: z.number().int().min(0).max(100),
-  WRINKLES: z.number().int().min(0).max(100),
 });
 
 export const validAnalysisSchema = z.object({
@@ -15,7 +14,7 @@ export const validAnalysisSchema = z.object({
   overallScore: z.number().int().min(0).max(100),
   metrics: metricSchema,
   overallComment: z.string(),
-  recommendedCombos: z.array(z.string().uuid()).max(3),
+  recommendedCombos: z.array(z.string().uuid()).min(1).max(8),
 });
 
 export const invalidAnalysisSchema = z.object({

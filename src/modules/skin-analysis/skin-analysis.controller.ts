@@ -34,7 +34,7 @@ export class SkinAnalysisController {
       userId,
     );
 
-    return new SimpleResponse(
+    return new SimpleResponse<{ analysisId: string | null; result: unknown }>(
       { analysisId, result },
       'Analysis completed successfully.',
       200,
