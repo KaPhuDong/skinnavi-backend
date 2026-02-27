@@ -27,10 +27,7 @@ export class SkinAnalysisService {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
-  async analyzeImage(
-    imageUrl: string,
-    userId: string,
-  ): Promise<{ analysisId: string | null; result: unknown }> {
+  async analyzeImage(imageUrl: string, userId: string) {
     const imageBase64 = await this.fetchImageAsBase64(imageUrl);
     const mimeType = inferMimeType(imageUrl);
 
@@ -44,9 +41,7 @@ export class SkinAnalysisService {
       include: { metrics: true, skin_type: true },
     });
 
-    if (cached) {
-      return this.mapAnalysisToResponse(cached);
-    }
+    if (cached) return this.mapAnalysisToResponse(cached);
 
     const combos = await this.prisma.skincare_combos.findMany({
       where: { is_active: true },
@@ -57,9 +52,21 @@ export class SkinAnalysisService {
       .map((c) => `- id: ${c.id}, name: ${c.combo_name}`)
       .join('\n');
 
-    const prompt = buildAnalysisPrompt(comboListText, imageUrl);
+    const last = await this.prisma.skin_analyses.findFirst({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+      include: { metrics: true, skin_type: true },
+    });
 
-    const aiRes = await this.callAIWithRetry({
+    const previousAnalysisText = this.buildPreviousAnalysisText(last);
+
+    const prompt = buildAnalysisPrompt(
+      comboListText,
+      imageUrl,
+      previousAnalysisText,
+    );
+
+    const aiRes = await this.ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: createUserContent([
         { inlineData: { mimeType, data: imageBase64 } },
@@ -73,8 +80,7 @@ export class SkinAnalysisService {
       },
     });
 
-    const text =
-      aiRes.text ?? aiRes.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+    const text = aiRes.text ?? aiRes.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!text) throw new BadRequestException('AI returned empty');
 
@@ -91,33 +97,8 @@ export class SkinAnalysisService {
 
     if (!skinType) throw new NotFoundException('Skin type not found');
 
-    const last = await this.prisma.skin_analyses.findFirst({
-      where: { user_id: userId },
-      orderBy: { created_at: 'desc' },
-      include: { metrics: true },
-    });
-
-    let finalScore = result.overallScore;
-    let finalMetrics = result.metrics;
-    let finalSkinTypeId = skinType.id;
-
-    if (last) {
-      finalScore = this.smooth(last.overall_score, finalScore);
-
-      finalMetrics = this.smoothMetrics(
-        last.metrics,
-        finalMetrics,
-      ) as typeof finalMetrics;
-
-      const scoreDiff = Math.abs(Number(last.overall_score) - finalScore);
-
-      if (last.skin_type_id !== skinType.id && scoreDiff < 10) {
-        finalSkinTypeId = last.skin_type_id;
-      }
-    }
-
     const recommendedCombos = combos
-      .filter((c) => c.skin_type_id === finalSkinTypeId)
+      .filter((c) => c.skin_type_id === skinType.id)
       .slice(0, 3)
       .map((c) => c.id);
 
@@ -125,8 +106,8 @@ export class SkinAnalysisService {
       const created = await tx.skin_analyses.create({
         data: {
           user_id: userId,
-          skin_type_id: finalSkinTypeId,
-          overall_score: new Prisma.Decimal(finalScore),
+          skin_type_id: skinType.id,
+          overall_score: new Prisma.Decimal(result.overallScore),
           overall_comment: result.overallComment,
           face_image_url: imageUrl,
           image_hash: imageHash,
@@ -134,7 +115,7 @@ export class SkinAnalysisService {
       });
 
       await tx.skin_analysis_metrics.createMany({
-        data: Object.entries(finalMetrics).map(([type, score]) => ({
+        data: Object.entries(result.metrics).map(([type, score]) => ({
           skin_analysis_id: created.id,
           metric_type: type as skin_metric_enum,
           score: new Prisma.Decimal(Number(score)),
@@ -148,36 +129,29 @@ export class SkinAnalysisService {
       analysisId: analysis.id,
       result: {
         ...result,
-        overallScore: finalScore,
-        metrics: finalMetrics,
         recommendedCombos,
       },
     };
   }
 
-  private smooth(oldScore: Prisma.Decimal | null, newScore: number) {
-    if (!oldScore) return newScore;
-    return Number(oldScore) * 0.7 + newScore * 0.3;
-  }
+  private buildPreviousAnalysisText(last: any) {
+    if (!last) return 'NO_PREVIOUS_ANALYSIS';
 
-  private smoothMetrics(
-    oldMetrics: any[],
-    newMetrics: Record<string, number>,
-  ): Record<string, number> {
-    const map = Object.fromEntries(
-      oldMetrics.map((m) => [m.metric_type, Number(m.score)]),
+    const metrics = Object.fromEntries(
+      last.metrics.map((m) => [m.metric_type, Number(m.score)]),
     );
 
-    const result: Record<string, number> = {};
+    return `
+PREVIOUS ANALYSIS:
 
-    for (const key in newMetrics) {
-      const oldVal = map[key];
-      const newVal = newMetrics[key];
+skinType: ${last.skin_type.code}
+overallScore: ${Number(last.overall_score)}
 
-      result[key] = oldVal ? oldVal * 0.7 + newVal * 0.3 : newVal;
-    }
-
-    return result;
+metrics:
+${Object.entries(metrics)
+  .map(([k, v]) => `- ${k}: ${v}`)
+  .join('\n')}
+`;
   }
 
   private mapAnalysisToResponse(analysis: any) {
@@ -198,7 +172,7 @@ export class SkinAnalysisService {
     };
   }
 
-  private async fetchImageAsBase64(imageUrl: string): Promise<string> {
+  private async fetchImageAsBase64(imageUrl: string) {
     const res = await fetch(imageUrl);
     if (!res.ok) {
       throw new BadRequestException(`Cannot fetch image: ${res.status}`);
@@ -208,103 +182,70 @@ export class SkinAnalysisService {
   }
 
   private parseAIResponse(text: string): AIAnalysisResult {
-    this.logger.debug('RAW AI TEXT:');
-    this.logger.debug(text);
-
-    if (!text || typeof text !== 'string') {
-      throw new BadRequestException('AI returned empty response');
-    }
-
     const cleaned = text
       .replace(/```json/gi, '')
       .replace(/```/g, '')
       .trim();
+    const json = JSON.parse(cleaned);
+    const parsed = analysisResultSchema.safeParse(json);
 
-    let json: unknown;
-
-    try {
-      json = JSON.parse(cleaned);
-    } catch {
-      this.logger.error('JSON.parse failed');
-      this.logger.debug(cleaned);
-      throw new BadRequestException('AI returned invalid JSON');
-    }
-
-    const parseResult = analysisResultSchema.safeParse(json);
-
-    if (parseResult.success === false) {
-      this.logger.error('Zod validation failed');
-
-      this.logger.debug(JSON.stringify(parseResult.error.format(), null, 2));
-
-      this.logger.debug(JSON.stringify(json, null, 2));
-
+    if (!parsed.success) {
       throw new BadRequestException('AI response validation failed');
     }
 
-    return parseResult.data;
-  }
-
-  private async callAIWithRetry(payload: any, retries = 2) {
-    for (let i = 0; i <= retries; i++) {
-      try {
-        return await this.ai.models.generateContent(payload);
-      } catch (err) {
-        if (i === retries) throw err;
-      }
-    }
-    throw new Error('callAIWithRetry failed');
+    return parsed.data;
   }
 }
 
 export function buildAnalysisPrompt(
   comboListText: string,
   imageUrl: string,
+  previousAnalysis: string,
 ): string {
   return `
 You are a professional AI skin analysis system.
 
-The input image URL is:
-${imageUrl}
-
-You MUST return this URL in the response as "imageUrl".
-
-Your task has 2 phases:
+IMAGE URL: ${imageUrl}
 
 ====================
-PHASE 1 — IMAGE VALIDATION
+TEMPORAL CONSISTENCY
 ====================
 
-Check if the image is suitable for skin analysis.
+${previousAnalysis}
 
-Reject the image if:
-- Face is not centered or occupies less than 60% of the frame
-- Blurry or low resolution
-- Too dark or overexposed
-- Strong shadows
-- Wearing glasses or face is obstructed
+Rules:
+
+- Previous analysis is for consistency only
+- The new image is the primary source of truth
+- DO NOT drastically change scores without clear visible reason
+- Score difference should normally NOT exceed 15 points
+- DO NOT randomly change skinType
+
+====================
+IMAGE VALIDATION
+====================
+
+Reject if:
+- Face < 60%
+- Blurry
+- Too dark / overexposed
 - Multiple faces
-- Not a real human face
+- Obstructed
 
-If invalid → return ONLY:
+If invalid → return:
 
 {
   "isValidImage": false,
   "imageUrl": "${imageUrl}",
-  "message": "short clear reason",
-  "guidelines": [
-    "Ensure face is centered and clearly visible.",
-    "Find a well-lit area, avoid harsh shadows.",
-    "Remove glasses or any accessories.",
-    "Keep a neutral expression for analysis."
-  ]
+  "message": "reason",
+  "guidelines": []
 }
 
 ====================
-PHASE 2 — SKIN ANALYSIS
+SKIN ANALYSIS
 ====================
 
-If the image is valid → return ONLY:
+If valid → return:
 
 {
   "isValidImage": true,
@@ -318,62 +259,15 @@ If the image is valid → return ONLY:
     "DARK_SPOTS": number
   },
   "overallComment": string,
-  "recommendedCombos": ["uuid1", "uuid2"]
-  }
+  "recommendedCombos": ["uuid"]
+}
 
 ====================
-SCORING RULES
+AVAILABLE COMBOS
 ====================
-
-All scores MUST be INTEGER from 0 → 100.
-
-100 = perfect healthy skin  
-70-85 = normal real-life healthy skin  
-50-69 = mild issues  
-30-49 = moderate issues  
-below 30 = severe  
-
-If unsure → return score between 65-75.
-
-DO NOT return decimal numbers.
-DO NOT return values outside 0-100.
-Do NOT guess invisible conditions.
-
-====================
-SKIN TYPE DETERMINATION (STRICT)
-====================
-
-Determine skinType FROM METRICS:
-
-OILY → PORES < 60 AND overallScore < 75  
-DRY → PORES > 70 AND overallScore < 70  
-COMBINATION → mixed pore distribution  
-SENSITIVE → redness / irritation dominates  
-NORMAL → all metrics > 70  
-
-DO NOT randomly choose skinType.
-
-====================
-COMBO SELECTION
-====================
-
-- Select 1-4 combos
-- MUST return UUIDs from AVAILABLE COMBOS
-- Prioritize matching skinType
-- Focus on the most severe skin issues based on metrics
-- If no perfect match exists → choose the closest suitable combos
-- recommendedCombos MUST NOT be empty
-
-AVAILABLE COMBOS:
 ${comboListText}
 
-====================
-STRICT RULES
-====================
-
 Return JSON only.
-No extra text.
-No null values.
 `;
 }
 
