@@ -4,11 +4,19 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiConsumes,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { UploadService } from './upload.service';
 import { SimpleResponse } from '../../common/dtos/index';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
@@ -19,6 +27,8 @@ export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
 
   @Post('image')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Upload image to Cloudinary' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
