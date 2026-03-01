@@ -203,7 +203,15 @@ export function buildAnalysisPrompt(
   previousAnalysis: string,
 ): string {
   return `
-You are a professional AI skin analysis system.
+You are a PROFESSIONAL AI SKIN ANALYSIS ENGINE.
+
+Your reasoning pipeline MUST follow this exact order:
+1. IMAGE VALIDATION
+2. METRIC SCORING
+3. TEMPORAL CONSISTENCY CHECK
+4. OVERALL SCORE CALCULATION
+5. SKIN TYPE DERIVATION (FROM METRICS ONLY)
+6. COMBO SELECTION
 
 IMAGE URL: ${imageUrl}
 
@@ -216,41 +224,129 @@ ${previousAnalysis}
 Rules:
 
 - Previous analysis is for consistency only
-- The new image is the primary source of truth
-- DO NOT drastically change scores without clear visible reason
-- Score difference should normally NOT exceed 15 points
+- The new image is the PRIMARY source of truth
+- Score difference per metric SHOULD NOT exceed 15 points
+- If visual condition is clearly improved/worsened → you MAY exceed 15
 - DO NOT randomly change skinType
+- If no clear visual change → keep scores close to previous
 
 ====================
-IMAGE VALIDATION
+PHASE 1 — IMAGE VALIDATION
 ====================
 
 Reject if:
 - Face < 60%
-- Blurry
+- Blurry / low resolution
 - Too dark / overexposed
+- Strong shadow
 - Multiple faces
 - Obstructed
+- Not a real human face
 
-If invalid → return:
+If invalid → return ONLY:
 
 {
   "isValidImage": false,
   "imageUrl": "${imageUrl}",
-  "message": "reason",
-  "guidelines": []
+  "message": "short clear reason",
+  "guidelines": [
+    "Ensure face is centered and large.",
+    "Use good lighting.",
+    "Avoid glasses or obstruction.",
+    "Keep neutral expression."
+  ]
 }
 
 ====================
-SKIN ANALYSIS
+PHASE 2 — METRIC SCORING
 ====================
 
-If valid → return:
+All scores MUST be INTEGER from 0 → 100.
+
+100 = perfect skin, no issue  
+85-99 = very good  
+70-84 = healthy real-life skin  
+50-69 = mild issue  
+30-49 = moderate  
+0-29 = severe  
+
+If unsure → return a SAFE value between 65-75.
+
+Each metric STARTS from 100 and is REDUCED by visible severity.
+
+PORES  
+ACNE  
+DARK_CIRCLES  
+DARK_SPOTS  
+
+CLAMP all values to 0-100.
+NO decimal numbers.
+
+====================
+TEMPORAL SMOOTHING
+====================
+
+If previous score exists:
+
+newScore = previousScore ± max 15
+
+UNLESS there is CLEAR visible improvement or worsening.
+
+====================
+OVERALL SCORE (STRICT FORMULA)
+====================
+
+overallScore = INTEGER AVERAGE of:
+
+PORES + ACNE + DARK_CIRCLES + DARK_SPOTS
+
+DO NOT estimate.
+DO NOT guess.
+
+====================
+SKIN TYPE DERIVATION (FROM METRICS ONLY)
+====================
+
+OILY → PORES < 60 AND ACNE < 70  
+DRY → PORES > 70 AND DARK_SPOTS ≥ 70 AND ACNE ≥ 70  
+SENSITIVE → visible redness / irritation dominates  
+COMBINATION → PORES significantly different across T-zone vs cheeks  
+NORMAL → ALL metrics ≥ 70  
+
+NEVER randomly choose skinType.
+
+====================
+COMBO SELECTION (MANDATORY)
+====================
+
+- recommendedCombos MUST contain EXACTLY 4 UUIDs
+- MUST NOT be empty
+- Use ONLY UUIDs from AVAILABLE COMBOS
+
+Selection priority:
+
+1. Lowest metric (main skin concern)
+2. skinType match
+3. Maintenance combo if ALL metrics ≥ 80
+
+If no perfect match → choose closest by skinType.
+
+====================
+AVAILABLE COMBOS
+====================
+
+${comboListText}
+
+====================
+FINAL OUTPUT
+====================
+
+If valid → return ONLY:
 
 {
   "isValidImage": true,
   "imageUrl": "${imageUrl}",
-  "skinType": "NORMAL | DRY | COMBINATION | SENSITIVE | OILY",
+  "skinType": "...",
   "overallScore": number,
   "metrics": {
     "PORES": number,
@@ -258,29 +354,18 @@ If valid → return:
     "DARK_CIRCLES": number,
     "DARK_SPOTS": number
   },
-  "overallComment": string,
+  "overallComment": "based on the LOWEST metric",
   "recommendedCombos": ["uuid","uuid","uuid","uuid"]
 }
 
 ====================
-COMBO RULES (MANDATORY):
+STRICT RULES
 ====================
 
-- recommendedCombos MUST NOT be empty
-- recommendedCombos MUST contain AT LEAST 4 UUIDs
-- Use ONLY UUIDs from AVAILABLE COMBOS
-- Select by:
-  1. lowest metric
-  2. skinType
-- If all metrics >= 80 → return maintenance combo
-- If no exact match → return closest by skinType
-
-====================
-AVAILABLE COMBOS
-====================
-${comboListText}
-
-Return JSON only.
+- JSON ONLY
+- INTEGER numbers ONLY
+- NO null
+- NO extra text
 `;
 }
 
