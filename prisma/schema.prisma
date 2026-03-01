@@ -134,6 +134,7 @@ model user_routines {
   id                             String                   @id @default(uuid()) @db.Uuid
   user_package_subscription_id   String                   @db.Uuid
   routine_time                   routine_time_enum
+  created_at                     DateTime                 @default(now())
 
   subscription                   user_package_subscriptions @relation(fields: [user_package_subscription_id], references: [id])
   steps                          user_routine_steps[]
