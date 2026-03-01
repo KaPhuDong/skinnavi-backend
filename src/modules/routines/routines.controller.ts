@@ -26,7 +26,7 @@ export class RoutinesController {
   @ApiBearerAuth('')
   @Get()
   async getByUser(@GetUser('userId') userId: string) {
-    const data = await this.routinesService.getRoutineByUser(userId);
+    const data = await this.routinesService.getLatestRoutineByUser(userId);
     return new SimpleResponse(data, 'Get routine by user', 200);
   }
 }
