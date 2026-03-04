@@ -11,6 +11,7 @@ model users {
   id                     String                     @id @default(uuid()) @db.Uuid
   email                  String                     @unique
   password_hash          String
+  hashed_refresh_token   String?
   full_name              String?
   avatar_url             String?
   role                   user_role_enum             @default(USER)

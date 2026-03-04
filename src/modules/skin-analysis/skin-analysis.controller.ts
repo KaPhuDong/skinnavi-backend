@@ -27,7 +27,7 @@ export class SkinAnalysisController {
   @ApiResponse({ status: 400, description: 'Invalid image URL or AI error' })
   async analyze(
     @Body() dto: AnalyzeSkinDto,
-    @GetUser('userId') userId: string,
+    @GetUser('id') userId: string,
   ): Promise<SimpleResponse<{ analysisId: string | null; result: unknown }>> {
     const { analysisId, result } = await this.skinAnalysisService.analyzeImage(
       dto.imageUrl,
