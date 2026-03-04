@@ -5,8 +5,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
-  const appOptions = { cors: true };
-  const app = await NestFactory.create(AppModule, appOptions);
+  const app = await NestFactory.create(AppModule);
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
@@ -41,6 +44,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('/docs', app, document);
 
-  await app.listen(3000);
+  const port = Number(process.env.PORT ?? process.env.APP_PORT ?? 3000);
+  await app.listen(port, '0.0.0.0');
 }
 bootstrap();

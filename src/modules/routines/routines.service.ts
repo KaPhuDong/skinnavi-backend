@@ -110,7 +110,12 @@ export class RoutinesService {
     const res = await this.ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { responseMimeType: 'application/json', temperature: 0.2 },
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0,
+        topP: 0.1,
+        topK: 1,
+      },
     });
 
     const raw =
@@ -187,7 +192,7 @@ export class RoutinesService {
     };
   }
 
-  async getRoutineByUser(userId: string) {
+  async getAllRoutinesByUser(userId: string) {
     return this.prisma.user_routines.findMany({
       where: {
         subscription: { user_id: userId },
@@ -197,8 +202,49 @@ export class RoutinesService {
           include: { product: true },
           orderBy: { step_order: 'asc' },
         },
+        subscription: true,
+      },
+      orderBy: {
+        created_at: 'desc',
       },
     });
+  }
+
+  async getLatestRoutineByUser(userId: string) {
+    const [morning, evening] = await Promise.all([
+      this.prisma.user_routines.findFirst({
+        where: {
+          subscription: { user_id: userId },
+          routine_time: 'MORNING',
+        },
+        include: {
+          steps: {
+            include: { product: true },
+            orderBy: { step_order: 'asc' },
+          },
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+      }),
+      this.prisma.user_routines.findFirst({
+        where: {
+          subscription: { user_id: userId },
+          routine_time: 'EVENING',
+        },
+        include: {
+          steps: {
+            include: { product: true },
+            orderBy: { step_order: 'asc' },
+          },
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+      }),
+    ]);
+
+    return { morning, evening };
   }
 
   async getRoutinePackages() {
