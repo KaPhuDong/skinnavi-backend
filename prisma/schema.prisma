@@ -24,7 +24,7 @@ model users {
 
 model skin_types {
   id           String           @id @default(uuid()) @db.Uuid
-  code         skin_type_enum
+  code         skin_type_enum   @unique
 
   skin_analyses skin_analyses[]
   skincare_combos skincare_combos[]
@@ -33,8 +33,10 @@ model skin_types {
 model skin_analyses {
   id              String        @id @default(uuid()) @db.Uuid
   user_id         String        @db.Uuid
+  image_hash      String?       @unique
   skin_type_id    String        @db.Uuid
   overall_score   Decimal?      @db.Decimal(5,2)
+  overall_comment  String?       @db.Text
   face_image_url  String?
   created_at      DateTime      @default(now())
 
@@ -109,6 +111,7 @@ model package_allowed_combos {
 
   routine_package   routine_packages   @relation(fields: [routine_package_id], references: [id])
   combo             skincare_combos    @relation(fields: [combo_id], references: [id])
+  @@unique([routine_package_id, combo_id])
 }
 
 model user_package_subscriptions {
@@ -131,6 +134,7 @@ model user_routines {
   id                             String                   @id @default(uuid()) @db.Uuid
   user_package_subscription_id   String                   @db.Uuid
   routine_time                   routine_time_enum
+  created_at                     DateTime                 @default(now())
 
   subscription                   user_package_subscriptions @relation(fields: [user_package_subscription_id], references: [id])
   steps                          user_routine_steps[]
