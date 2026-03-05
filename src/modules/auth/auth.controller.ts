@@ -1,4 +1,12 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Req,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import {
   ApiTags,
@@ -6,9 +14,11 @@ import {
   ApiResponse,
   ApiExtraModels,
   getSchemaPath,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { CreateAuthDto, LoginDto } from './dto/index';
 import { SimpleResponse } from '../../common/dtos/index';
+import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('auth')
 @ApiExtraModels(SimpleResponse)
@@ -44,8 +54,8 @@ export class AuthController {
     },
   })
   async register(@Body() createAuthDto: CreateAuthDto) {
-    await this.authService.register(createAuthDto);
-    return new SimpleResponse(null, 'Registered successfully.', 201);
+    const result = await this.authService.register(createAuthDto);
+    return new SimpleResponse(result, 'Registered successfully.', 201);
   }
 
   @Post('login')
@@ -86,5 +96,27 @@ export class AuthController {
       'Login successful.',
       200,
     );
+  }
+
+  @Post('logout')
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Logout user' })
+  async logout(@Req() req) {
+    await this.authService.logout(req.user['id']);
+    return new SimpleResponse(null, 'Logged out successfully.', 200);
+  }
+
+  @Post('refresh')
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard('jwt-refresh'))
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Refresh tokens' })
+  async refreshTokens(@Req() req) {
+    const userId = req.user['sub'];
+    const refreshToken = req.user['refreshToken'];
+    const tokens = await this.authService.refreshTokens(userId, refreshToken);
+    return new SimpleResponse(tokens, 'Tokens refreshed successfully.', 200);
   }
 }
