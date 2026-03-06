@@ -120,14 +120,12 @@ export class RoutinesService {
 
     const raw =
       (res as any).text ?? res.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (!raw) throw new BadRequestException('AI did not return JSON');
 
     const cleaned = raw
       .replace(/^```json\s*/i, '')
       .replace(/\s*```$/i, '')
       .trim();
-
     let parsed: any;
     try {
       parsed = JSON.parse(cleaned);
@@ -135,60 +133,65 @@ export class RoutinesService {
       throw new BadRequestException('AI returned invalid JSON');
     }
 
-    if (!parsed.morning || !parsed.evening) {
-      throw new BadRequestException('AI response missing morning/evening');
-    }
-
     const validProductIds = combo.combo_products.map((cp) => cp.product.id);
 
-    const morning = await this.prisma.user_routines.create({
-      data: {
-        user_package_subscription_id: subscription.id,
-        routine_time: 'MORNING',
-      },
-    });
-
-    for (const step of parsed.morning.steps) {
-      if (!validProductIds.includes(step.productId)) {
-        throw new BadRequestException(`Invalid productId: ${step.productId}`);
-      }
-
-      await this.prisma.user_routine_steps.create({
+    const saveRoutine = async (time: 'MORNING' | 'EVENING', steps: any[]) => {
+      const routine = await this.prisma.user_routines.create({
         data: {
-          user_routine_id: morning.id,
-          step_order: step.step,
-          instruction: `${step.title}: ${step.howTo}`,
-          product_id: step.productId,
+          user_package_subscription_id: subscription.id,
+          routine_time: time,
         },
       });
-    }
 
-    const evening = await this.prisma.user_routines.create({
-      data: {
-        user_package_subscription_id: subscription.id,
-        routine_time: 'EVENING',
-      },
-    });
+      for (const step of steps) {
+        if (!validProductIds.includes(step.productId)) {
+          throw new BadRequestException(`Invalid productId: ${step.productId}`);
+        }
 
-    for (const step of parsed.evening.steps) {
-      if (!validProductIds.includes(step.productId)) {
-        throw new BadRequestException(`Invalid productId: ${step.productId}`);
+        const productInfo = combo.combo_products.find(
+          (cp) => cp.product.id === step.productId,
+        )?.product;
+
+        const createdStep = await this.prisma.user_routine_steps.create({
+          data: {
+            user_routine_id: routine.id,
+            step_order: step.step,
+            instruction: `${step.title}: ${step.howTo}`,
+            product_id: step.productId,
+          },
+        });
+
+        if (productInfo?.usage_role) {
+          const instructionTemplate =
+            await this.prisma.product_usage_instructions.findUnique({
+              where: { usage_role: productInfo.usage_role },
+              include: { sub_steps: { orderBy: { step_order: 'asc' } } },
+            });
+
+          if (instructionTemplate && instructionTemplate.sub_steps.length > 0) {
+            const subStepsData = instructionTemplate.sub_steps.map((ss) => ({
+              user_routine_step_id: createdStep.id,
+              title: ss.title,
+              how_to: ss.how_to,
+              image_url: ss.image_url,
+            }));
+
+            await this.prisma.user_routine_sub_steps.createMany({
+              data: subStepsData,
+            });
+          }
+        }
       }
+      return routine.id;
+    };
 
-      await this.prisma.user_routine_steps.create({
-        data: {
-          user_routine_id: evening.id,
-          step_order: step.step,
-          instruction: `${step.title}: ${step.howTo}`,
-          product_id: step.productId,
-        },
-      });
-    }
+    const morningRoutineId = await saveRoutine('MORNING', parsed.morning.steps);
+    const eveningRoutineId = await saveRoutine('EVENING', parsed.evening.steps);
 
     return {
       subscriptionId: subscription.id,
-      morningRoutineId: morning.id,
-      eveningRoutineId: evening.id,
+      morningRoutineId,
+      eveningRoutineId,
     };
   }
 
@@ -199,7 +202,7 @@ export class RoutinesService {
       },
       include: {
         steps: {
-          include: { product: true },
+          include: { product: true, sub_steps: true },
           orderBy: { step_order: 'asc' },
         },
         subscription: true,
@@ -219,7 +222,7 @@ export class RoutinesService {
         },
         include: {
           steps: {
-            include: { product: true },
+            include: { product: true, sub_steps: true },
             orderBy: { step_order: 'asc' },
           },
         },
@@ -234,7 +237,7 @@ export class RoutinesService {
         },
         include: {
           steps: {
-            include: { product: true },
+            include: { product: true, sub_steps: true },
             orderBy: { step_order: 'asc' },
           },
         },
@@ -249,5 +252,16 @@ export class RoutinesService {
 
   async getRoutinePackages() {
     return this.prisma.routine_packages.findMany();
+  }
+
+  async getStepDetail(stepId: string) {
+    const step = await this.prisma.user_routine_steps.findUnique({
+      where: { id: stepId },
+      include: { product: true, sub_steps: true },
+    });
+    if (!step) {
+      throw new NotFoundException('Routine step not found');
+    }
+    return step;
   }
 }
