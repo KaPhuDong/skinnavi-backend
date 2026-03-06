@@ -4,6 +4,7 @@ import { seedUsers } from './user.seed';
 import { seedProducts } from './product.seed';
 import { seedProductCombos } from './combo.seed';
 import { seedRoutinePackages } from './routine-package.seed';
+import { seedRoutineInstructions } from './product_usage_instructions.seed';
 
 const prisma = new PrismaClient();
 
@@ -24,6 +25,9 @@ async function main() {
 
   await seedRoutinePackages(prisma);
   console.log('✅ Routine packages seeded.');
+
+  await seedRoutineInstructions(prisma);
+  console.log('✅ Product usage instructions seeded.');
 }
 
 main().finally(async () => {
