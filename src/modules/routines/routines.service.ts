@@ -28,7 +28,6 @@ export class RoutinesService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    // Create daily logs for today when server starts
     try {
       this.logger.log('Checking and creating daily logs for today...');
       await this.createDailyLogsForToday();
@@ -38,7 +37,6 @@ export class RoutinesService implements OnModuleInit {
     }
   }
 
-  // Create and check daily logs for all active routines (manual trigger)
   async createAndCheckDailyLogs(): Promise<{
     created: number;
     checked: number;
@@ -50,7 +48,6 @@ export class RoutinesService implements OnModuleInit {
     const todayEnd = new Date(now);
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Find all active routines where subscription is still valid
     const activeRoutines = await this.prisma.user_routines.findMany({
       where: {
         subscription: {
@@ -69,24 +66,20 @@ export class RoutinesService implements OnModuleInit {
 
     for (const routine of activeRoutines) {
       try {
-        // Calculate the date range for this routine
         const routineStartDate = new Date(routine.created_at);
         routineStartDate.setHours(0, 0, 0, 0);
 
         const subscriptionEndDate = new Date(routine.subscription.end_date);
         subscriptionEndDate.setHours(23, 59, 59, 999);
 
-        // Use the later date between routine creation and subscription start
         const startDate =
           routineStartDate > new Date(routine.subscription.start_date)
             ? routineStartDate
             : new Date(routine.subscription.start_date);
 
-        // Use the earlier date between today and subscription end
         const endDate =
           today < subscriptionEndDate ? today : subscriptionEndDate;
 
-        // Create logs for each day from start to end
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
           const logDate = new Date(currentDate);
@@ -112,7 +105,6 @@ export class RoutinesService implements OnModuleInit {
             totalCreated++;
           }
 
-          // Move to next day
           currentDate.setDate(currentDate.getDate() + 1);
         }
       } catch (error) {
@@ -129,7 +121,6 @@ export class RoutinesService implements OnModuleInit {
     return { created: totalCreated, checked: totalChecked, logs: allLogs };
   }
 
-  // Create daily logs only for today (used on server startup)
   private async createDailyLogsForToday() {
     const now = new Date();
     const today = new Date(now);
@@ -137,7 +128,6 @@ export class RoutinesService implements OnModuleInit {
     const todayEnd = new Date(now);
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Find all active routines where subscription is still valid
     const activeRoutines = await this.prisma.user_routines.findMany({
       where: {
         subscription: {
@@ -147,7 +137,6 @@ export class RoutinesService implements OnModuleInit {
       },
     });
 
-    // Create daily logs for today only if not already created
     const results: any[] = [];
     for (const routine of activeRoutines) {
       try {
