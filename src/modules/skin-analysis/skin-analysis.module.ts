@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { SkinAnalysisController } from './skin-analysis.controller';
 import { SkinAnalysisService } from './skin-analysis.service';
 import { PrismaModule } from '../../prisma/prisma.module';
-import { ApiKeyManagerService } from 'src/common/services/api-key-manager.service';
+import { ApiKeyManagerService } from 'src/common/aipKeyManager/api-key-manager.service';
 
 @Module({
   imports: [PrismaModule],

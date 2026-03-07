@@ -10,7 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma, skin_metric_enum } from '@prisma/client';
 import crypto from 'crypto';
 import { AIAnalysisResult, analysisResultSchema } from './skin-analysis.schema';
-import { ApiKeyManagerService } from '../../common/services/api-key-manager.service';
+import { ApiKeyManagerService } from '../../common/aipKeyManager/api-key-manager.service';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -24,21 +24,21 @@ export class SkinAnalysisService {
     private apiKeyManager: ApiKeyManagerService,
   ) {}
 
-  private async generateContentWithRetry(
-    modelName: string,
-    contentParams: any,
-  ) {
+  private async generateContentWithRetry(modelName: string, params: any) {
     let attempts = 0;
     const maxAttempts = this.apiKeyManager.totalKeys;
 
     while (attempts < maxAttempts) {
       const apiKey = this.apiKeyManager.getCurrentKey();
-      const ai = new GoogleGenAI({ apiKey });
+
+      const ai = new GoogleGenAI({
+        apiKey,
+      });
 
       try {
         return await ai.models.generateContent({
           model: modelName,
-          ...contentParams,
+          ...params,
         });
       } catch (error: any) {
         if (
@@ -230,10 +230,19 @@ ${Object.entries(metrics)
       .replace(/```json/gi, '')
       .replace(/```/g, '')
       .trim();
+
+    this.logger.debug('AI RAW RESPONSE: ' + cleaned);
+
     const json = JSON.parse(cleaned);
+
     const parsed = analysisResultSchema.safeParse(json);
 
     if (!parsed.success) {
+      this.logger.error(
+        'AI VALIDATION ERROR: ' +
+          JSON.stringify(parsed.error.format(), null, 2),
+      );
+
       throw new BadRequestException('AI response validation failed');
     }
 
