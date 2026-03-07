@@ -278,26 +278,36 @@ Rules:
 PHASE 1 — IMAGE VALIDATION
 ====================
 
-Reject if:
-- Face < 60%
-- Blurry / low resolution
-- Too dark / overexposed
-- Strong shadow
-- Multiple faces
-- Obstructed
-- Not a real human face
+Check if the image is suitable for facial skin analysis.
+
+The image MUST satisfy ALL conditions below:
+
+1. Face is clearly visible and centered
+2. Face occupies at least 60% of the image
+3. Image is sharp and not blurry
+4. Lighting is sufficient and even
+5. No harsh shadows on the face
+6. Only ONE face in the image
+7. No glasses, mask, or accessories covering skin
+8. Skin areas (forehead, cheeks, nose, chin) are visible
+9. Expression is neutral (no exaggerated smile or distortion)
+10. The image shows a real human face
+
+Reject the image if ANY condition fails.
 
 If invalid → return ONLY:
 
 {
   "isValidImage": false,
   "imageUrl": "${imageUrl}",
-  "message": "short clear reason",
+  "message": "Short reason why the image cannot be analyzed",
   "guidelines": [
-    "Ensure face is centered and large.",
-    "Use good lighting.",
-    "Avoid glasses or obstruction.",
-    "Keep neutral expression."
+    "Ensure your face is centered and clearly visible in the frame.",
+    "Make sure your face occupies most of the photo.",
+    "Use good natural lighting and avoid strong shadows.",
+    "Remove glasses, masks, or any accessories.",
+    "Keep a neutral facial expression.",
+    "Avoid blurry or low-resolution photos."
   ]
 }
 
