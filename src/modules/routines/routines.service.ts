@@ -1,8 +1,11 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
@@ -11,8 +14,9 @@ import { ApiKeyManagerService } from 'src/common/aipKeyManager/api-key-manager.s
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 @Injectable()
-export class RoutinesService {
+export class RoutinesService implements OnModuleInit {
   private ai: GoogleGenAI;
+  private readonly logger = new Logger(RoutinesService.name);
 
   constructor(
     private prisma: PrismaService,
@@ -21,6 +25,150 @@ export class RoutinesService {
   ) {
     const apiKey = this.apiKeyManager.getCurrentKey();
     this.ai = new GoogleGenAI({ apiKey });
+  }
+
+  async onModuleInit() {
+    try {
+      this.logger.log('Checking and creating daily logs for today...');
+      await this.createDailyLogsForToday();
+      this.logger.log('Daily logs check completed');
+    } catch (error) {
+      this.logger.error('Failed to create daily logs on startup:', error);
+    }
+  }
+
+  async createAndCheckDailyLogs(): Promise<{
+    created: number;
+    checked: number;
+    logs: any[];
+  }> {
+    const now = new Date();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(now);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const activeRoutines = await this.prisma.user_routines.findMany({
+      where: {
+        subscription: {
+          start_date: { lte: todayEnd },
+          end_date: { gte: today },
+        },
+      },
+      include: {
+        subscription: true,
+      },
+    });
+
+    let totalCreated = 0;
+    let totalChecked = 0;
+    const allLogs: any[] = [];
+
+    for (const routine of activeRoutines) {
+      try {
+        const routineStartDate = new Date(routine.created_at);
+        routineStartDate.setHours(0, 0, 0, 0);
+
+        const subscriptionEndDate = new Date(routine.subscription.end_date);
+        subscriptionEndDate.setHours(23, 59, 59, 999);
+
+        const startDate =
+          routineStartDate > new Date(routine.subscription.start_date)
+            ? routineStartDate
+            : new Date(routine.subscription.start_date);
+
+        const endDate =
+          today < subscriptionEndDate ? today : subscriptionEndDate;
+
+        const currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+          const logDate = new Date(currentDate);
+
+          const existingLog = await this.prisma.routine_daily_logs.findFirst({
+            where: {
+              user_routine_id: routine.id,
+              log_date: logDate,
+            },
+          });
+
+          totalChecked++;
+
+          if (!existingLog) {
+            const newLog = await this.prisma.routine_daily_logs.create({
+              data: {
+                user_routine_id: routine.id,
+                log_date: logDate,
+                is_completed: false,
+              },
+            });
+            allLogs.push(newLog);
+            totalCreated++;
+          }
+
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to create logs for routine ${routine.id}:`,
+          error,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Checked ${totalChecked} logs, created ${totalCreated} new logs`,
+    );
+    return { created: totalCreated, checked: totalChecked, logs: allLogs };
+  }
+
+  private async createDailyLogsForToday() {
+    const now = new Date();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(now);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const activeRoutines = await this.prisma.user_routines.findMany({
+      where: {
+        subscription: {
+          start_date: { lte: todayEnd },
+          end_date: { gte: today },
+        },
+      },
+    });
+
+    const results: any[] = [];
+    for (const routine of activeRoutines) {
+      try {
+        const existingLog = await this.prisma.routine_daily_logs.findFirst({
+          where: {
+            user_routine_id: routine.id,
+            log_date: today,
+          },
+        });
+
+        if (!existingLog) {
+          const newLog = await this.prisma.routine_daily_logs.create({
+            data: {
+              user_routine_id: routine.id,
+              log_date: today,
+              is_completed: false,
+            },
+          });
+          results.push(newLog);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to create today's log for routine ${routine.id}:`,
+          error,
+        );
+      }
+    }
+
+    if (results.length > 0) {
+      this.logger.log(`Created ${results.length} daily logs for today`);
+    }
+    return { created: results.length, logs: results };
   }
 
   private async generateContentWithRetry(
@@ -290,5 +438,230 @@ export class RoutinesService {
       throw new NotFoundException('Routine step not found');
     }
     return step;
+  }
+
+  // Create daily logs for all missing days (runs every day at midnight)
+  // This creates logs for ALL days from routine creation to today
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async createDailyLogs() {
+    const now = new Date();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(now);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // Find all active routines where subscription is still valid
+    const activeRoutines = await this.prisma.user_routines.findMany({
+      where: {
+        subscription: {
+          start_date: { lte: todayEnd },
+          end_date: { gte: today },
+        },
+      },
+      include: {
+        subscription: true,
+      },
+    });
+
+    // Create daily logs for each active routine if not already created
+    const results: any[] = [];
+    for (const routine of activeRoutines) {
+      try {
+        // Calculate the date range for this routine
+        const routineStartDate = new Date(routine.created_at);
+        routineStartDate.setHours(0, 0, 0, 0);
+
+        const subscriptionEndDate = new Date(routine.subscription.end_date);
+        subscriptionEndDate.setHours(23, 59, 59, 999);
+
+        // Use the later date between routine creation and subscription start
+        const startDate =
+          routineStartDate > new Date(routine.subscription.start_date)
+            ? routineStartDate
+            : new Date(routine.subscription.start_date);
+
+        // Use the earlier date between today and subscription end
+        const endDate =
+          today < subscriptionEndDate ? today : subscriptionEndDate;
+
+        // Create logs for each day from start to end
+        const currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+          const logDate = new Date(currentDate);
+
+          const existingLog = await this.prisma.routine_daily_logs.findFirst({
+            where: {
+              user_routine_id: routine.id,
+              log_date: logDate,
+            },
+          });
+
+          if (!existingLog) {
+            const newLog = await this.prisma.routine_daily_logs.create({
+              data: {
+                user_routine_id: routine.id,
+                log_date: logDate,
+                is_completed: false,
+              },
+            });
+            results.push(newLog);
+          }
+
+          // Move to next day
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to create logs for routine ${routine.id}:`,
+          error,
+        );
+      }
+    }
+
+    return { created: results.length, logs: results };
+  }
+
+  // Update daily log completion status
+  async updateDailyLog(logId: string, is_completed: boolean) {
+    const log = await this.prisma.routine_daily_logs.findUnique({
+      where: { id: logId },
+    });
+
+    if (!log) {
+      throw new NotFoundException('Daily log not found');
+    }
+
+    return this.prisma.routine_daily_logs.update({
+      where: { id: logId },
+      data: { is_completed },
+    });
+  }
+
+  // Get tracking overview with date range filter
+  async getTrackingOverview(
+    userId: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const user = await this.prisma.users.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Parse dates with fallback to full range if not provided
+    let start: Date | null = null;
+    let end: Date | null = null;
+
+    if (startDate) {
+      start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+    }
+
+    if (endDate) {
+      end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+    }
+
+    // Get all skin analyses with metrics (for trend analysis)
+    const skinAnalyses = await this.prisma.skin_analyses.findMany({
+      where: { user_id: userId },
+      include: {
+        skin_type: true,
+        metrics: true,
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    // Build skin analyses with trend calculation
+    const analyzesWithTrend: any[] = [];
+    for (let i = 0; i < skinAnalyses.length; i++) {
+      const current = skinAnalyses[i];
+      const previous = skinAnalyses[i + 1];
+
+      let scoreTrend: number | null = null;
+      if (current.overall_score && previous?.overall_score) {
+        scoreTrend =
+          Number(current.overall_score) - Number(previous.overall_score);
+      }
+
+      analyzesWithTrend.push({
+        id: current.id,
+        skin_type_code: current.skin_type.code,
+        overall_score: current.overall_score
+          ? Number(current.overall_score)
+          : null,
+        overall_comment: current.overall_comment,
+        created_at: current.created_at.toISOString(),
+        face_image_url: current.face_image_url,
+        overall_score_trend: scoreTrend,
+        metrics: current.metrics.map((m) => ({
+          metric_type: m.metric_type,
+          score: m.score ? Number(m.score) : null,
+        })),
+      });
+    }
+
+    // Get all routines with daily logs (filter logs by date range)
+    const subscriptions = await this.prisma.user_package_subscriptions.findMany(
+      {
+        where: { user_id: userId },
+        include: {
+          routines: {
+            include: {
+              daily_logs: {
+                where:
+                  start && end ? { log_date: { gte: start, lte: end } } : {},
+                orderBy: { log_date: 'asc' },
+              },
+            },
+            orderBy: { routine_time: 'asc' },
+          },
+        },
+      },
+    );
+
+    // Build routines array (separated from skin analyses)
+    const routines: any[] = [];
+
+    for (const subscription of subscriptions) {
+      for (const routine of subscription.routines) {
+        const completedCount = routine.daily_logs.filter(
+          (log) => log.is_completed,
+        ).length;
+
+        routines.push({
+          routine_id: routine.id,
+          routine_time: routine.routine_time,
+          routine_created_at: routine.created_at.toISOString(),
+          subscription_id: subscription.id,
+          subscription_start_date: subscription.start_date
+            .toISOString()
+            .split('T')[0],
+          subscription_end_date: subscription.end_date
+            .toISOString()
+            .split('T')[0],
+          daily_logs: routine.daily_logs.map((log) => ({
+            id: log.id,
+            user_routine_id: log.user_routine_id,
+            log_date: log.log_date.toISOString().split('T')[0],
+            is_completed: log.is_completed,
+          })),
+          completed_count: completedCount,
+          total_count: routine.daily_logs.length,
+        });
+      }
+    }
+
+    return {
+      user_id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      avatar_url: user.avatar_url,
+      skin_analyses: analyzesWithTrend,
+      routines,
+    };
   }
 }
