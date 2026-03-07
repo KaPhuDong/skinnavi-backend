@@ -9,6 +9,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
+import { ApiKeyManagerService } from 'src/common/aipKeyManager/api-key-manager.service';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -20,14 +21,46 @@ export class RoutinesService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private apiKeyManager: ApiKeyManagerService,
   ) {
-    const apiKey = this.config.get<string>('GEMINI_API_KEY');
-    if (!apiKey) throw new Error('GEMINI_API_KEY is required');
+    const apiKey = this.apiKeyManager.getCurrentKey();
     this.ai = new GoogleGenAI({ apiKey });
   }
 
+  private async generateContentWithRetry(
+    modelName: string,
+    contentParams: any,
+  ) {
+    let attempts = 0;
+    while (attempts < this.apiKeyManager.totalKeys) {
+      const apiKey = this.apiKeyManager.getCurrentKey();
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+      });
+
+      try {
+        return await ai.models.generateContent({
+          model: modelName,
+          contents: contentParams,
+        });
+      } catch (error: any) {
+        if (
+          error?.status === 429 ||
+          error?.message?.includes('429') ||
+          error?.message?.toLowerCase().includes('quota')
+        ) {
+          this.apiKeyManager.getNextKey();
+          attempts++;
+        } else {
+          throw error;
+        }
+      }
+    }
+    throw new BadRequestException('All API keys exhausted');
+  }
+
   async onModuleInit() {
-    // Create daily logs for today when server starts
     try {
       this.logger.log('Checking and creating daily logs for today...');
       await this.createDailyLogsForToday();
@@ -37,7 +70,6 @@ export class RoutinesService implements OnModuleInit {
     }
   }
 
-  // Create and check daily logs for all active routines (manual trigger)
   async createAndCheckDailyLogs(): Promise<{
     created: number;
     checked: number;
@@ -49,7 +81,6 @@ export class RoutinesService implements OnModuleInit {
     const todayEnd = new Date(now);
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Find all active routines where subscription is still valid
     const activeRoutines = await this.prisma.user_routines.findMany({
       where: {
         subscription: {
@@ -68,24 +99,20 @@ export class RoutinesService implements OnModuleInit {
 
     for (const routine of activeRoutines) {
       try {
-        // Calculate the date range for this routine
         const routineStartDate = new Date(routine.created_at);
         routineStartDate.setHours(0, 0, 0, 0);
 
         const subscriptionEndDate = new Date(routine.subscription.end_date);
         subscriptionEndDate.setHours(23, 59, 59, 999);
 
-        // Use the later date between routine creation and subscription start
         const startDate =
           routineStartDate > new Date(routine.subscription.start_date)
             ? routineStartDate
             : new Date(routine.subscription.start_date);
 
-        // Use the earlier date between today and subscription end
         const endDate =
           today < subscriptionEndDate ? today : subscriptionEndDate;
 
-        // Create logs for each day from start to end
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
           const logDate = new Date(currentDate);
@@ -111,7 +138,6 @@ export class RoutinesService implements OnModuleInit {
             totalCreated++;
           }
 
-          // Move to next day
           currentDate.setDate(currentDate.getDate() + 1);
         }
       } catch (error) {
@@ -128,7 +154,6 @@ export class RoutinesService implements OnModuleInit {
     return { created: totalCreated, checked: totalChecked, logs: allLogs };
   }
 
-  // Create daily logs only for today (used on server startup)
   private async createDailyLogsForToday() {
     const now = new Date();
     const today = new Date(now);
@@ -136,7 +161,6 @@ export class RoutinesService implements OnModuleInit {
     const todayEnd = new Date(now);
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Find all active routines where subscription is still valid
     const activeRoutines = await this.prisma.user_routines.findMany({
       where: {
         subscription: {
@@ -146,7 +170,6 @@ export class RoutinesService implements OnModuleInit {
       },
     });
 
-    // Create daily logs for today only if not already created
     const results: any[] = [];
     for (const routine of activeRoutines) {
       try {
@@ -266,16 +289,9 @@ export class RoutinesService implements OnModuleInit {
     - No markdown, no explanation.
     `;
 
-    const res = await this.ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: 'application/json',
-        temperature: 0,
-        topP: 0.1,
-        topK: 1,
-      },
-    });
+    const res = await this.generateContentWithRetry(GEMINI_MODEL, [
+      { role: 'user', parts: [{ text: prompt }] },
+    ]);
 
     const raw =
       (res as any).text ?? res.candidates?.[0]?.content?.parts?.[0]?.text;
