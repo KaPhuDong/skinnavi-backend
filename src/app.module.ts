@@ -11,6 +11,7 @@ import { SkinAnalysisModule } from './modules/skin-analysis/skin-analysis.module
 import { RoutinePackagesModule } from './modules/routine-packages/routine-packages.module';
 import { CombosModule } from './modules/combos/combos.module';
 import { PaymentsModule } from './modules/payments/payment.module';
+import { TrackingModule } from './modules/tracking/tracking.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PaymentsModule } from './modules/payments/payment.module';
     RoutinePackagesModule,
     RoutinesModule,
     PaymentsModule,
+    TrackingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

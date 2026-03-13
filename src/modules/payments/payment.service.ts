@@ -19,40 +19,58 @@ export class PaymentsService {
     userId: string,
     packageId: string,
   ): Promise<EligibilityResponse> {
-    const targetPkg = await this.prisma.routine_packages.findUnique({
+    const now = new Date();
+
+    const targetPackage = await this.prisma.routine_packages.findUnique({
       where: { id: packageId },
     });
 
-    if (!targetPkg) throw new NotFoundException('Package not found');
+    if (!targetPackage) {
+      throw new NotFoundException('Package not found');
+    }
 
-    const now = new Date();
+    const hasEverHadActiveSubscription =
+      await this.prisma.user_package_subscriptions.findFirst({
+        where: {
+          user_id: userId,
+          is_active: true,
+        },
+      });
 
-    const subscriptions = await this.prisma.user_package_subscriptions.findMany(
-      {
-        where: { user_id: userId },
-        include: { routine_package: true },
-        orderBy: { end_date: 'desc' },
-      },
-    );
+    const currentActiveSub =
+      await this.prisma.user_package_subscriptions.findFirst({
+        where: {
+          user_id: userId,
+          is_active: true,
+          end_date: { gt: now },
+        },
+        include: {
+          routine_package: true,
+        },
+      });
 
-    const activeSub = subscriptions.find(
-      (sub) => sub.is_active && sub.end_date > now,
-    );
+    const isEligibleForFreeTrial =
+      targetPackage.duration_days <= 7 && !hasEverHadActiveSubscription;
 
-    const hasEverSubscribed = subscriptions.length > 0;
-    const isFreeTrial = !hasEverSubscribed && targetPkg.duration_days <= 7;
-    const requiresPayment = !isFreeTrial && Number(targetPkg.price) > 0;
+    if (!currentActiveSub) {
+      return {
+        requiresPayment: isEligibleForFreeTrial
+          ? false
+          : targetPackage.price.gt(0),
+        isFreeTrial: isEligibleForFreeTrial,
+        hasActivePackage: false,
+        currentPackage: null,
+      };
+    }
 
     return {
-      isFreeTrial,
-      requiresPayment,
-      hasActivePackage: !!activeSub,
-      currentPackage: activeSub
-        ? {
-            name: activeSub.routine_package.package_name,
-            endDate: activeSub.end_date,
-          }
-        : null,
+      requiresPayment: targetPackage.price.gt(0),
+      isFreeTrial: false,
+      hasActivePackage: true,
+      currentPackage: {
+        name: currentActiveSub.routine_package.package_name,
+        endDate: currentActiveSub.end_date,
+      },
     };
   }
 
@@ -67,16 +85,6 @@ export class PaymentsService {
     });
 
     if (!pkg) throw new NotFoundException('Package not found');
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.user_package_subscriptions.updateMany({
-        where: {
-          user_id: userId,
-          is_active: true,
-        },
-        data: { is_active: false },
-      });
-    });
 
     const subscription = await this.prisma.user_package_subscriptions.create({
       data: {
@@ -185,6 +193,16 @@ export class PaymentsService {
             payment.subscription.routine_package.duration_days,
         );
 
+        await tx.user_package_subscriptions.updateMany({
+          where: {
+            user_id: payment.user_id,
+            is_active: true,
+          },
+          data: {
+            is_active: false,
+          },
+        });
+
         await tx.user_package_subscriptions.update({
           where: { id: payment.subscription_id },
           data: {
@@ -233,7 +251,7 @@ export class PaymentsService {
       vnp_Version: '2.1.0',
       vnp_Command: 'pay',
       vnp_TmnCode: tmnCode,
-      vnp_Locale: 'vn',
+      vnp_Locale: 'en',
       vnp_CurrCode: 'VND',
       vnp_TxnRef: paymentId,
       vnp_OrderInfo: `Pay for order ${paymentId}`,

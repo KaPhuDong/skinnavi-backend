@@ -25,59 +25,80 @@ export class SkinAnalysisService {
   async checkAnalysisLimit(userId: string) {
     const now = new Date();
 
-    // 1. Lấy gói dịch vụ đang hoạt động
+    const todayAnalysis = await this.prisma.skin_analyses.findFirst({
+      where: {
+        user_id: userId,
+        created_at: {
+          gte: new Date(new Date().setHours(0, 0, 0, 0)),
+        },
+      },
+    });
+
+    if (todayAnalysis) {
+      throw new BadRequestException(
+        'You have already performed a skin analysis today. Please try again tomorrow.',
+      );
+    }
+
     const activeSub = await this.prisma.user_package_subscriptions.findFirst({
-      where: { user_id: userId, is_active: true, end_date: { gt: now } },
+      where: {
+        user_id: userId,
+        is_active: true,
+        end_date: { gt: now },
+      },
       include: { routine_package: true },
     });
 
     if (!activeSub) {
-      throw new BadRequestException(
-        'Bạn cần đăng ký gói dịch vụ để sử dụng tính năng này.',
-      );
+      return;
     }
 
     const duration = activeSub.routine_package.duration_days;
-    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay())); // Tính từ Chủ Nhật
 
-    // 2. Đếm số lần đã phân tích
+    const startOfWeek = new Date();
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+
     const totalAnalyses = await this.prisma.skin_analyses.count({
-      where: { user_id: userId, created_at: { gte: activeSub.start_date } },
+      where: {
+        user_id: userId,
+        created_at: { gte: activeSub.start_date, lte: activeSub.end_date },
+      },
     });
 
     const weeklyAnalyses = await this.prisma.skin_analyses.count({
-      where: { user_id: userId, created_at: { gte: startOfWeek } },
-    });
-
-    // 3. Kiểm tra logic theo gói
-    if (duration <= 7) {
-      if (totalAnalyses >= 1)
-        throw new BadRequestException(
-          'Gói 1 tuần chỉ hỗ trợ phân tích 1 lần duy nhất.',
-        );
-    } else if (duration <= 30) {
-      if (weeklyAnalyses >= 3)
-        throw new BadRequestException(
-          'Gói 1 tháng giới hạn 3 lần phân tích/tuần.',
-        );
-    } else if (duration <= 90) {
-      if (weeklyAnalyses >= 5)
-        throw new BadRequestException(
-          'Gói 3 tháng giới hạn 5 lần phân tích/tuần.',
-        );
-    }
-
-    // 4. Kiểm tra giới hạn 1 lần/ngày (Chống spam)
-    const todayAnalysis = await this.prisma.skin_analyses.findFirst({
       where: {
         user_id: userId,
-        created_at: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        created_at: { gte: startOfWeek },
       },
     });
-    if (todayAnalysis)
-      throw new BadRequestException(
-        'Bạn chỉ có thể phân tích da 1 lần mỗi ngày.',
-      );
+
+    if (duration <= 7) {
+      if (totalAnalyses >= 1) {
+        throw new BadRequestException(
+          'The Free Trial allows only 1 skin analysis. Please upgrade to a paid package for more analyses.',
+        );
+      }
+    } else if (duration <= 30) {
+      if (weeklyAnalyses >= 3) {
+        throw new BadRequestException(
+          'The Essential Routine allows only 3 analyses per week. Please wait until next week or upgrade to the Advanced Routine for more frequent analyses.',
+        );
+      }
+    } else if (duration <= 90) {
+      if (weeklyAnalyses >= 5) {
+        throw new BadRequestException(
+          'The Advanced Routine allows only 5 analyses per week. Please wait until next week for more analyses.',
+        );
+      }
+    }
+
+    this.logger.debug({
+      startDate: activeSub.start_date,
+      endDate: activeSub.end_date,
+      totalAnalyses,
+      duration: activeSub.routine_package.duration_days,
+    });
   }
 
   private async generateContentWithRetry(modelName: string, params: any) {

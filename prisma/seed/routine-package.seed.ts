@@ -4,7 +4,7 @@ export async function seedRoutinePackages(prisma: PrismaClient) {
   await prisma.routine_packages.createMany({
     data: [
       {
-        package_name: 'Starter Routine - 1 Week',
+        package_name: 'Starter Routine',
         description:
           'The Starter Routine is designed for users who want to quickly understand their skin and try a personalized skincare routine without long-term commitment. This package helps you build healthy daily habits and see how your skin reacts before moving to a longer plan.',
         highlights: [
@@ -19,7 +19,7 @@ export async function seedRoutinePackages(prisma: PrismaClient) {
         allow_tracking: false,
       },
       {
-        package_name: 'Essential Routine - 1 Month',
+        package_name: 'Essential Routine',
         description:
           'The Essential Routine is perfect for users who want visible improvements through consistency. Over 30 days, you’ll follow a structured skincare plan tailored to your skin type and goals, helping you maintain healthier, more balanced skin.',
         highlights: [
@@ -34,7 +34,7 @@ export async function seedRoutinePackages(prisma: PrismaClient) {
         allow_tracking: true,
       },
       {
-        package_name: 'Advanced Routine - 3 Months',
+        package_name: 'Advanced Routine',
         description:
           'The Advanced Routine is designed for long-term skin transformation. With a 90-day plan, this package supports gradual and sustainable improvement, helping your skin adapt, recover, and maintain optimal health over time.',
         highlights: [
