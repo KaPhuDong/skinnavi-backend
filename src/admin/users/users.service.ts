@@ -50,4 +50,21 @@ export class AdminUsersService {
         'Active = users with a skin analysis within activeDays OR (optionally) an active subscription today.',
     };
   }
+  async getUserGrowth() {
+    const rows = await this.prisma.$queryRaw<
+      Array<{ month: Date; new_users: bigint }>
+    >`
+      SELECT 
+        DATE_TRUNC('month', created_at) AS month,
+        COUNT(*)::bigint AS new_users
+      FROM users
+      GROUP BY month
+      ORDER BY month ASC
+    `;
+
+    return rows.map((row) => ({
+      month: row.month,
+      newUsers: Number(row.new_users),
+    }));
+  }
 }

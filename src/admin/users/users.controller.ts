@@ -25,4 +25,8 @@ export class AdminUsersController {
       includeSubscriptionActive,
     });
   }
+  @Get('growth')
+  async getUserGrowth() {
+    return this.usersService.getUserGrowth();
+  }
 }
