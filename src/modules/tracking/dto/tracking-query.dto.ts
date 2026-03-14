@@ -1,4 +1,5 @@
-import { IsISO8601, IsOptional } from 'class-validator';
+import { IsISO8601, IsOptional, IsInt, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class TrackingQueryDto {
@@ -19,4 +20,15 @@ export class TrackingQueryDto {
   @IsOptional()
   @IsISO8601({ strict: true })
   endDate?: string;
+
+  @ApiProperty({
+    example: 7,
+    description: 'Number of days to look back for skin analyses (default 7)',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  days?: number;
 }
