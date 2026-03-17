@@ -90,6 +90,8 @@ export class AdminUsersService {
             },
             take: 1,
             select: {
+              start_date: true,
+              end_date: true,
               routine_package: {
                 select: {
                   package_name: true,
@@ -102,21 +104,25 @@ export class AdminUsersService {
       this.prisma.users.count(),
     ]);
 
-    const formatted = users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      fullName: user.full_name,
-      avatarUrl: user.avatar_url,
-      role: user.role,
-      createdAt: user.created_at,
-      subscription:
-        user.user_package_subscriptions.length > 0
+    const formatted = users.map((user) => {
+      const subscription = user.user_package_subscriptions[0];
+
+      return {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        avatarUrl: user.avatar_url,
+        role: user.role,
+        createdAt: user.created_at,
+        subscription: subscription
           ? {
-              packageName:
-                user.user_package_subscriptions[0].routine_package.package_name,
+              packageName: subscription.routine_package.package_name,
+              startDate: subscription.start_date,
+              endDate: subscription.end_date,
             }
           : null,
-    }));
+      };
+    });
 
     return {
       items: formatted,
