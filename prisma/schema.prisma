@@ -194,6 +194,7 @@ model routine_daily_logs {
   user_routine_id String          @db.Uuid
   log_date        DateTime        @db.Date
   is_completed    Boolean         @default(false)
+  completed_at    DateTime?    
 
   user_routine    user_routines   @relation(fields: [user_routine_id], references: [id])
 }
