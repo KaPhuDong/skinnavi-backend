@@ -100,4 +100,47 @@ export class AdminRevenueService {
       },
     };
   }
+  async getMRR() {
+    const now = new Date();
+
+    const subscriptions = await this.prisma.user_package_subscriptions.findMany(
+      {
+        where: {
+          is_active: true,
+          end_date: {
+            gte: now,
+          },
+        },
+        include: {
+          routine_package: true,
+        },
+      },
+    );
+
+    let totalMRR = 0;
+
+    const breakdown = subscriptions.map((sub) => {
+      const price = Number(sub.routine_package.price);
+      const durationDays = sub.routine_package.duration_days;
+
+      const months = durationDays / 30;
+      const monthlyValue = price / months;
+
+      totalMRR += monthlyValue;
+
+      return {
+        subscriptionId: sub.id,
+        packageName: sub.routine_package.package_name,
+        monthlyValue,
+      };
+    });
+
+    return {
+      totalMRR,
+      totalActiveSubscriptions: subscriptions.length,
+      averageRevenuePerUser:
+        subscriptions.length > 0 ? totalMRR / subscriptions.length : 0,
+      breakdown,
+    };
+  }
 }

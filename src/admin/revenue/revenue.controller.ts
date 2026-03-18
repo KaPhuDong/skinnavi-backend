@@ -22,4 +22,15 @@ export class AdminRevenueController {
       tz: tzRaw,
     });
   }
+  @Get('mrr')
+  async getMRR() {
+    const data = await this.revenueService.getMRR();
+
+    return {
+      statusCode: 200,
+      success: true,
+      message: 'Get MRR successfully',
+      data,
+    };
+  }
 }
