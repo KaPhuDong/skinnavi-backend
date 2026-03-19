@@ -19,10 +19,13 @@ export class TrackingService implements OnModuleInit {
     const activeSub = await this.prisma.user_package_subscriptions.findFirst({
       where: {
         user_id: userId,
-        is_active: true,
-        end_date: { gt: new Date() },
       },
-      include: { routine_package: true },
+      orderBy: {
+        created_at: 'desc',
+      },
+      include: {
+        routine_package: true,
+      },
     });
 
     if (!activeSub) {
@@ -50,16 +53,30 @@ export class TrackingService implements OnModuleInit {
     }
   }
 
+  private toDateOnly(date: Date): Date {
+    return new Date(
+      Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+  }
+
   async createAndCheckDailyLogs(): Promise<{
     created: number;
     checked: number;
     logs: any[];
   }> {
     const now = new Date();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(now);
-    todayEnd.setHours(23, 59, 59, 999);
+    const today = this.toDateOnly(now);
+
+    const todayEnd = new Date(today);
+    todayEnd.setUTCHours(23, 59, 59, 999);
 
     const activeRoutines = await this.prisma.user_routines.findMany({
       where: {
@@ -79,28 +96,34 @@ export class TrackingService implements OnModuleInit {
 
     for (const routine of activeRoutines) {
       try {
-        const routineStartDate = new Date(routine.created_at);
-        routineStartDate.setHours(0, 0, 0, 0);
+        const routineStartDate = this.toDateOnly(new Date(routine.created_at));
 
-        const subscriptionEndDate = new Date(routine.subscription.end_date);
-        subscriptionEndDate.setHours(23, 59, 59, 999);
+        const subscriptionEndDate = new Date(
+          this.toDateOnly(new Date(routine.subscription.end_date)),
+        );
+        subscriptionEndDate.setUTCHours(23, 59, 59, 999);
+
+        const subStart = this.toDateOnly(
+          new Date(routine.subscription.start_date),
+        );
 
         const startDate =
-          routineStartDate > new Date(routine.subscription.start_date)
-            ? routineStartDate
-            : new Date(routine.subscription.start_date);
+          routineStartDate > subStart ? routineStartDate : subStart;
 
         const endDate =
           today < subscriptionEndDate ? today : subscriptionEndDate;
 
         const currentDate = new Date(startDate);
+
         while (currentDate <= endDate) {
-          const logDate = new Date(currentDate);
+          const logDate = this.toDateOnly(currentDate);
 
           const existingLog = await this.prisma.routine_daily_logs.findFirst({
             where: {
               user_routine_id: routine.id,
-              log_date: logDate,
+              log_date: {
+                equals: logDate,
+              },
             },
           });
 
@@ -118,7 +141,7 @@ export class TrackingService implements OnModuleInit {
             totalCreated++;
           }
 
-          currentDate.setDate(currentDate.getDate() + 1);
+          currentDate.setUTCDate(currentDate.getUTCDate() + 1);
         }
       } catch (error) {
         this.logger.error(
@@ -131,6 +154,7 @@ export class TrackingService implements OnModuleInit {
     this.logger.log(
       `Checked ${totalChecked} logs, created ${totalCreated} new logs`,
     );
+
     return { created: totalCreated, checked: totalChecked, logs: allLogs };
   }
 
@@ -187,10 +211,10 @@ export class TrackingService implements OnModuleInit {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async createDailyLogs() {
     const now = new Date();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(now);
-    todayEnd.setHours(23, 59, 59, 999);
+    const today = this.toDateOnly(now);
+
+    const todayEnd = new Date(today);
+    todayEnd.setUTCHours(23, 59, 59, 999);
 
     const activeRoutines = await this.prisma.user_routines.findMany({
       where: {
@@ -205,30 +229,37 @@ export class TrackingService implements OnModuleInit {
     });
 
     const results: any[] = [];
+
     for (const routine of activeRoutines) {
       try {
-        const routineStartDate = new Date(routine.created_at);
-        routineStartDate.setHours(0, 0, 0, 0);
+        const routineStartDate = this.toDateOnly(new Date(routine.created_at));
 
-        const subscriptionEndDate = new Date(routine.subscription.end_date);
-        subscriptionEndDate.setHours(23, 59, 59, 999);
+        const subscriptionEndDate = new Date(
+          this.toDateOnly(new Date(routine.subscription.end_date)),
+        );
+        subscriptionEndDate.setUTCHours(23, 59, 59, 999);
+
+        const subStart = this.toDateOnly(
+          new Date(routine.subscription.start_date),
+        );
 
         const startDate =
-          routineStartDate > new Date(routine.subscription.start_date)
-            ? routineStartDate
-            : new Date(routine.subscription.start_date);
+          routineStartDate > subStart ? routineStartDate : subStart;
 
         const endDate =
           today < subscriptionEndDate ? today : subscriptionEndDate;
 
         const currentDate = new Date(startDate);
+
         while (currentDate <= endDate) {
-          const logDate = new Date(currentDate);
+          const logDate = this.toDateOnly(currentDate);
 
           const existingLog = await this.prisma.routine_daily_logs.findFirst({
             where: {
               user_routine_id: routine.id,
-              log_date: logDate,
+              log_date: {
+                equals: logDate,
+              },
             },
           });
 
@@ -243,7 +274,7 @@ export class TrackingService implements OnModuleInit {
             results.push(newLog);
           }
 
-          currentDate.setDate(currentDate.getDate() + 1);
+          currentDate.setUTCDate(currentDate.getUTCDate() + 1);
         }
       } catch (error) {
         this.logger.error(
@@ -256,18 +287,72 @@ export class TrackingService implements OnModuleInit {
     return { created: results.length, logs: results };
   }
 
+  private getTimeRange(baseDate: Date, startHour: number, endHour: number) {
+    const start = new Date(baseDate);
+    start.setHours(startHour, 0, 0, 0);
+
+    const end = new Date(baseDate);
+    end.setHours(endHour, 0, 0, 0);
+
+    return { start, end };
+  }
+
+  private isInRange(now: Date, start: Date, end: Date) {
+    return now >= start && now < end;
+  }
+
   async updateDailyLog(logId: string, is_completed: boolean) {
     const log = await this.prisma.routine_daily_logs.findUnique({
       where: { id: logId },
+      include: {
+        user_routine: true,
+      },
     });
 
     if (!log) {
       throw new NotFoundException('Daily log not found');
     }
 
+    const now = new Date();
+
+    if (is_completed) {
+      const baseDate = new Date(log.log_date);
+      const routineTime = log.user_routine.routine_time;
+
+      const morningRange = this.getTimeRange(baseDate, 0, 12);
+
+      const eveningStart = new Date(baseDate);
+      eveningStart.setHours(12, 0, 0, 0);
+
+      const eveningEnd = new Date(baseDate);
+      eveningEnd.setDate(eveningEnd.getDate() + 1);
+      eveningEnd.setHours(0, 0, 0, 0);
+
+      if (
+        routineTime === 'MORNING' &&
+        !this.isInRange(now, morningRange.start, morningRange.end)
+      ) {
+        throw new BadRequestException(
+          'Morning routine must be checked between 12:00 AM and 12:00 PM',
+        );
+      }
+
+      if (
+        routineTime === 'EVENING' &&
+        !this.isInRange(now, eveningStart, eveningEnd)
+      ) {
+        throw new BadRequestException(
+          'Evening routine must be checked between 12:00 PM and 12:00 AM',
+        );
+      }
+    }
+
     return this.prisma.routine_daily_logs.update({
       where: { id: logId },
-      data: { is_completed },
+      data: {
+        is_completed,
+        completed_at: is_completed ? now : null,
+      },
     });
   }
 
@@ -284,7 +369,6 @@ export class TrackingService implements OnModuleInit {
       throw new NotFoundException('User not found');
     }
 
-    // Parse dates with fallback to full range if not provided
     let start: Date | null = null;
     let end: Date | null = null;
 
