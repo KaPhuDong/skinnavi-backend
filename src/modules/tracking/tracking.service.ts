@@ -19,10 +19,13 @@ export class TrackingService implements OnModuleInit {
     const activeSub = await this.prisma.user_package_subscriptions.findFirst({
       where: {
         user_id: userId,
-        is_active: true,
-        end_date: { gt: new Date() },
       },
-      include: { routine_package: true },
+      orderBy: {
+        created_at: 'desc',
+      },
+      include: {
+        routine_package: true,
+      },
     });
 
     if (!activeSub) {
