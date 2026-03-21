@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Order } from '@Constant/index';
 
 @Injectable()
 export class TrackingService implements OnModuleInit {
@@ -21,7 +22,7 @@ export class TrackingService implements OnModuleInit {
         user_id: userId,
       },
       orderBy: {
-        created_at: 'desc',
+        created_at: Order.DESC,
       },
       include: {
         routine_package: true,
@@ -382,17 +383,15 @@ export class TrackingService implements OnModuleInit {
       end.setHours(23, 59, 59, 999);
     }
 
-    // Get all skin analyses with metrics (for trend analysis)
     const skinAnalyses = await this.prisma.skin_analyses.findMany({
       where: { user_id: userId },
       include: {
         skin_type: true,
         metrics: true,
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: { created_at: Order.DESC },
     });
 
-    // Build skin analyses with trend calculation
     const analyzesWithTrend: any[] = [];
     for (let i = 0; i < skinAnalyses.length; i++) {
       const current = skinAnalyses[i];
@@ -421,7 +420,6 @@ export class TrackingService implements OnModuleInit {
       });
     }
 
-    // Get all routines with daily logs (filter logs by date range)
     const subscriptions = await this.prisma.user_package_subscriptions.findMany(
       {
         where: { user_id: userId },
@@ -431,16 +429,15 @@ export class TrackingService implements OnModuleInit {
               daily_logs: {
                 where:
                   start && end ? { log_date: { gte: start, lte: end } } : {},
-                orderBy: { log_date: 'asc' },
+                orderBy: { log_date: Order.ASC },
               },
             },
-            orderBy: { routine_time: 'asc' },
+            orderBy: { routine_time: Order.ASC },
           },
         },
       },
     );
 
-    // Build routines array (separated from skin analyses)
     const routines: any[] = [];
 
     for (const subscription of subscriptions) {
@@ -513,10 +510,10 @@ export class TrackingService implements OnModuleInit {
               daily_logs: {
                 where:
                   start && end ? { log_date: { gte: start, lte: end } } : {},
-                orderBy: { log_date: 'asc' },
+                orderBy: { log_date: Order.ASC },
               },
             },
-            orderBy: { routine_time: 'asc' },
+            orderBy: { routine_time: Order.ASC },
           },
         },
       },
@@ -582,7 +579,7 @@ export class TrackingService implements OnModuleInit {
         skin_type: true,
         metrics: true,
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: { created_at: Order.DESC },
     });
 
     if (skinAnalyses.length < 2) {
