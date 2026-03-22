@@ -96,14 +96,9 @@ export class TrackingController {
   @Get('latest/daily-logs')
   async getLatestDailyLogs(
     @GetUser('id') userId: string,
-    @Query() query: TrackingQueryDto,
   ): Promise<SimpleResponse<any>> {
-    const data = await this.trackingService.getLatestDailyLogs(
-      userId,
-      query.startDate,
-      query.endDate,
-    );
-    return new SimpleResponse(data, 'Get latest subscription daily logs', 200);
+    const data = await this.trackingService.getTodayDailyLogs(userId);
+    return new SimpleResponse(data, 'Get today subscription daily logs', 200);
   }
 
   @UseGuards(JwtAuthGuard)
