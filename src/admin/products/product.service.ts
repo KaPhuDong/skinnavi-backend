@@ -56,6 +56,7 @@ export class ProductsService {
       display_price?: number;
       affiliate_url?: string;
       image_url?: string;
+      usage_role?: string;
     },
   ) {
     const existing = await this.prisma.affiliate_products.findUnique({

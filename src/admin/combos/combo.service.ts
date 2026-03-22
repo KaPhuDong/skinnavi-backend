@@ -66,6 +66,11 @@ export class CombosService {
       step_order: number;
     }[];
   }) {
+    const stepSet = new Set(data.products.map((p) => p.step_order));
+    if (stepSet.size !== data.products.length) {
+      throw new Error('Duplicate step_order detected');
+    }
+
     return this.prisma.skincare_combos.create({
       data: {
         skin_type_id: data.skin_type_id,
@@ -83,7 +88,10 @@ export class CombosService {
         },
       },
       include: {
-        combo_products: true,
+        combo_products: {
+          include: { product: true },
+          orderBy: { step_order: 'asc' },
+        },
       },
     });
   }
@@ -111,6 +119,13 @@ export class CombosService {
       throw new NotFoundException('Combo not found');
     }
 
+    if (data.products) {
+      const stepSet = new Set(data.products.map((p) => p.step_order));
+      if (stepSet.size !== data.products.length) {
+        throw new Error('Duplicate step_order detected');
+      }
+    }
+
     return this.prisma.skincare_combos.update({
       where: { id },
       data: {
@@ -123,7 +138,9 @@ export class CombosService {
 
         ...(data.products && {
           combo_products: {
-            deleteMany: {}, // xoá hết cũ
+            deleteMany: {
+              combo_id: id,
+            },
             create: data.products.map((p) => ({
               product_id: p.product_id,
               step_order: p.step_order,
@@ -132,7 +149,10 @@ export class CombosService {
         }),
       },
       include: {
-        combo_products: true,
+        combo_products: {
+          include: { product: true },
+          orderBy: { step_order: 'asc' },
+        },
       },
     });
   }
@@ -145,6 +165,10 @@ export class CombosService {
     if (!existing) {
       throw new NotFoundException('Combo not found');
     }
+
+    await this.prisma.combo_products.deleteMany({
+      where: { combo_id: id },
+    });
 
     return this.prisma.skincare_combos.delete({
       where: { id },
