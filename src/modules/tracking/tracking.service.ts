@@ -217,71 +217,83 @@ export class TrackingService implements OnModuleInit {
     const todayEnd = new Date(today);
     todayEnd.setUTCHours(23, 59, 59, 999);
 
-    const activeRoutines = await this.prisma.user_routines.findMany({
-      where: {
-        subscription: {
+    const latestSubscriptions =
+      await this.prisma.user_package_subscriptions.findMany({
+        where: {
+          status: 'ACTIVE',
+          routine_package: {
+            duration_days: {
+              in: [30, 90],
+            },
+          },
           start_date: { lte: todayEnd },
           end_date: { gte: today },
         },
-      },
-      include: {
-        subscription: true,
-      },
-    });
+        orderBy: {
+          created_at: 'desc',
+        },
+        include: {
+          routine_package: true,
+          routines: true,
+        },
+        distinct: ['user_id'],
+      });
 
     const results: any[] = [];
 
-    for (const routine of activeRoutines) {
-      try {
-        const routineStartDate = this.toDateOnly(new Date(routine.created_at));
+    for (const subscription of latestSubscriptions) {
+      for (const routine of subscription.routines) {
+        try {
+          const routineStartDate = this.toDateOnly(
+            new Date(routine.created_at),
+          );
 
-        const subscriptionEndDate = new Date(
-          this.toDateOnly(new Date(routine.subscription.end_date)),
-        );
-        subscriptionEndDate.setUTCHours(23, 59, 59, 999);
+          const subscriptionEndDate = new Date(
+            this.toDateOnly(new Date(subscription.end_date)),
+          );
+          subscriptionEndDate.setUTCHours(23, 59, 59, 999);
 
-        const subStart = this.toDateOnly(
-          new Date(routine.subscription.start_date),
-        );
+          const subStart = this.toDateOnly(new Date(subscription.start_date));
 
-        const startDate =
-          routineStartDate > subStart ? routineStartDate : subStart;
+          const startDate =
+            routineStartDate > subStart ? routineStartDate : subStart;
 
-        const endDate =
-          today < subscriptionEndDate ? today : subscriptionEndDate;
+          const endDate =
+            today < subscriptionEndDate ? today : subscriptionEndDate;
 
-        const currentDate = new Date(startDate);
+          const currentDate = new Date(startDate);
 
-        while (currentDate <= endDate) {
-          const logDate = this.toDateOnly(currentDate);
+          while (currentDate <= endDate) {
+            const logDate = this.toDateOnly(currentDate);
 
-          const existingLog = await this.prisma.routine_daily_logs.findFirst({
-            where: {
-              user_routine_id: routine.id,
-              log_date: {
-                equals: logDate,
-              },
-            },
-          });
-
-          if (!existingLog) {
-            const newLog = await this.prisma.routine_daily_logs.create({
-              data: {
+            const existingLog = await this.prisma.routine_daily_logs.findFirst({
+              where: {
                 user_routine_id: routine.id,
-                log_date: logDate,
-                is_completed: false,
+                log_date: {
+                  equals: logDate,
+                },
               },
             });
-            results.push(newLog);
-          }
 
-          currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+            if (!existingLog) {
+              const newLog = await this.prisma.routine_daily_logs.create({
+                data: {
+                  user_routine_id: routine.id,
+                  log_date: logDate,
+                  is_completed: false,
+                },
+              });
+              results.push(newLog);
+            }
+
+            currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+          }
+        } catch (error) {
+          this.logger.error(
+            `Failed to create logs for routine ${routine.id}:`,
+            error,
+          );
         }
-      } catch (error) {
-        this.logger.error(
-          `Failed to create logs for routine ${routine.id}:`,
-          error,
-        );
       }
     }
 
@@ -530,6 +542,7 @@ export class TrackingService implements OnModuleInit {
           routine_id: routine.id,
           routine_time: routine.routine_time,
           routine_created_at: routine.created_at.toISOString(),
+
           subscription_id: subscription.id,
           subscription_start_date: subscription.start_date
             .toISOString()
@@ -537,6 +550,7 @@ export class TrackingService implements OnModuleInit {
           subscription_end_date: subscription.end_date
             .toISOString()
             .split('T')[0],
+
           daily_logs: routine.daily_logs.map((log) => ({
             id: log.id,
             user_routine_id: log.user_routine_id,
@@ -551,6 +565,93 @@ export class TrackingService implements OnModuleInit {
 
     return {
       user_id: user.id,
+      routines,
+    };
+  }
+
+  async getTodayDailyLogs(userId: string) {
+    const user = await this.prisma.users.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const today = this.toDateOnly(new Date());
+
+    const latestSubscription =
+      await this.prisma.user_package_subscriptions.findFirst({
+        where: { user_id: userId },
+        orderBy: { created_at: Order.DESC },
+        include: {
+          routine_package: true,
+          routines: {
+            include: {
+              daily_logs: {
+                where: {
+                  log_date: {
+                    equals: today,
+                  },
+                },
+              },
+            },
+            orderBy: { routine_time: Order.ASC },
+          },
+        },
+      });
+
+    if (!latestSubscription) {
+      return {
+        user_id: user.id,
+        type: 'NO_SUBSCRIPTION',
+        routines: [],
+      };
+    }
+
+    const duration = latestSubscription.routine_package?.duration_days;
+    if (duration === 7) {
+      return {
+        user_id: user.id,
+        type: 'WEEKLY_NO_LOG',
+        routines: [],
+      };
+    }
+
+    const routines: any[] = [];
+
+    for (const routine of latestSubscription.routines) {
+      const todayLog = routine.daily_logs[0];
+
+      if (todayLog) {
+        routines.push({
+          routine_id: routine.id,
+          routine_time: routine.routine_time,
+          routine_created_at: routine.created_at.toISOString(),
+
+          daily_log: {
+            id: todayLog.id,
+            user_routine_id: todayLog.user_routine_id,
+            log_date: todayLog.log_date.toISOString().split('T')[0],
+            is_completed: todayLog.is_completed,
+          },
+
+          is_completed: todayLog.is_completed,
+        });
+      }
+    }
+
+    if (routines.length === 0) {
+      return {
+        user_id: user.id,
+        type: 'NO_LOG_TODAY',
+        routines: [],
+      };
+    }
+
+    return {
+      user_id: user.id,
+      type: 'HAS_LOG',
       routines,
     };
   }
