@@ -4,7 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SubscriptionStatus } from '@Constant/index';
+import { payment_status_enum, subscription_status_enum } from '@prisma/client';
+import { Order } from '@Constant/index';
 
 @Injectable()
 export class AdminSubscriptionsService {
@@ -13,18 +14,38 @@ export class AdminSubscriptionsService {
   async getActiveSubscriptions() {
     const now = new Date();
 
+    const lastMonth = new Date();
+    lastMonth.setMonth(now.getMonth() - 1);
+
     const activeCount = await this.prisma.user_package_subscriptions.count({
       where: {
-        status: SubscriptionStatus.ACTIVE,
+        status: subscription_status_enum.ACTIVE,
         start_date: { lte: now },
         end_date: { gte: now },
       },
     });
 
+    const lastMonthActiveCount =
+      await this.prisma.user_package_subscriptions.count({
+        where: {
+          start_date: { lte: lastMonth },
+          end_date: { gte: lastMonth },
+          status: subscription_status_enum.ACTIVE,
+        },
+      });
+
+    let growthRate = 0;
+    if (lastMonthActiveCount > 0) {
+      growthRate =
+        ((activeCount - lastMonthActiveCount) / lastMonthActiveCount) * 100;
+    } else {
+      growthRate = activeCount > 0 ? 100 : 0;
+    }
+
     const byPackage = await this.prisma.user_package_subscriptions.groupBy({
       by: ['routine_package_id'],
       where: {
-        status: SubscriptionStatus.ACTIVE,
+        status: subscription_status_enum.ACTIVE,
         start_date: { lte: now },
         end_date: { gte: now },
       },
@@ -33,12 +54,13 @@ export class AdminSubscriptionsService {
 
     return {
       activeSubscriptions: activeCount,
+      growthRate: Number(growthRate.toFixed(2)),
       byPackage: byPackage.map((r) => ({
         routinePackageId: r.routine_package_id,
         activeSubscriptions: r._count._all,
       })),
       activeDefinition:
-        'Active = status ACTIVE + start_date <= today AND end_date >= today',
+        'Active = status ACTIVE + start_date <= reference_date AND end_date >= reference_date',
     };
   }
 
@@ -52,7 +74,7 @@ export class AdminSubscriptionsService {
         },
       },
       orderBy: {
-        price: 'asc',
+        price: Order.ASC,
       },
     });
 
@@ -180,60 +202,78 @@ export class AdminSubscriptionsService {
     const subs = await this.prisma.user_package_subscriptions.findMany({
       where: {
         status: {
-          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.EXPIRED],
+          in: [
+            subscription_status_enum.ACTIVE,
+            subscription_status_enum.EXPIRED,
+            subscription_status_enum.CANCELED,
+          ],
         },
       },
       include: {
         routine_package: true,
+        payments: {
+          where: {
+            status: payment_status_enum.SUCCESS,
+          },
+        },
       },
       orderBy: {
         created_at: 'asc',
       },
     });
 
-    const userMap = new Map<
+    const userStats = new Map<
       string,
-      {
-        freeDate?: Date;
-        paidDate?: Date;
-      }
+      { hasFree: boolean; converted: boolean; firstFreeDate?: Date }
     >();
 
-    subs.forEach((sub) => {
+    for (const sub of subs) {
       const userId = sub.user_id;
+      const packagePrice = Number(sub.routine_package.price);
+      const totalPaid = sub.payments.reduce(
+        (sum, p) => sum + Number(p.amount),
+        0,
+      );
 
-      if (!userMap.has(userId)) {
-        userMap.set(userId, {});
+      const isFreeRecord = packagePrice === 0 || totalPaid === 0;
+
+      if (!userStats.has(userId)) {
+        userStats.set(userId, { hasFree: false, converted: false });
       }
 
-      const user = userMap.get(userId)!;
+      const stats = userStats.get(userId)!;
 
-      const price = Number(sub.routine_package.price);
-
-      if (price === 0 && !user.freeDate) {
-        user.freeDate = sub.created_at;
+      if (isFreeRecord) {
+        if (!stats.hasFree) {
+          stats.hasFree = true;
+          stats.firstFreeDate = sub.created_at;
+        }
+      } else {
+        if (stats.hasFree && !stats.converted) {
+          stats.converted = true;
+        }
       }
+    }
 
-      if (price > 0 && !user.paidDate) {
-        user.paidDate = sub.created_at;
-      }
-    });
-
+    let totalUsers = 0;
     let convertedUsers = 0;
 
-    userMap.forEach((u) => {
-      if (u.freeDate && u.paidDate && u.freeDate < u.paidDate) {
-        convertedUsers++;
+    userStats.forEach((stats) => {
+      if (stats.hasFree) {
+        totalUsers++;
+        if (stats.converted) {
+          convertedUsers++;
+        }
       }
     });
 
-    const totalUsers = userMap.size;
+    const conversionRate =
+      totalUsers === 0 ? 0 : (convertedUsers / totalUsers) * 100;
 
     return {
       totalUsers,
       convertedUsers,
-      conversionRate:
-        totalUsers === 0 ? 0 : (convertedUsers / totalUsers) * 100,
+      conversionRate,
     };
   }
 
@@ -241,16 +281,25 @@ export class AdminSubscriptionsService {
     const subs = await this.prisma.user_package_subscriptions.findMany({
       where: {
         status: {
-          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.EXPIRED],
+          in: [
+            subscription_status_enum.ACTIVE,
+            subscription_status_enum.EXPIRED,
+            subscription_status_enum.CANCELED,
+          ],
         },
       },
       include: {
         routine_package: {
           select: { price: true },
         },
+        payments: {
+          where: {
+            status: payment_status_enum.SUCCESS,
+          },
+        },
       },
       orderBy: {
-        start_date: 'asc',
+        created_at: 'asc',
       },
     });
 
@@ -262,12 +311,22 @@ export class AdminSubscriptionsService {
       }
     > = {};
 
-    const userHistory = new Map<string, Date>();
+    const userStats = new Map<
+      string,
+      { hasFree: boolean; converted: boolean }
+    >();
 
     for (const sub of subs) {
       const userId = sub.user_id;
-      const month = sub.start_date.toISOString().slice(0, 7);
-      const price = Number(sub.routine_package.price);
+      const month = sub.created_at.toISOString().slice(0, 7);
+
+      const packagePrice = Number(sub.routine_package.price);
+      const totalPaid = sub.payments.reduce(
+        (sum, p) => sum + Number(p.amount),
+        0,
+      );
+
+      const isFreeRecord = packagePrice === 0 || totalPaid === 0;
 
       if (!monthly[month]) {
         monthly[month] = {
@@ -276,18 +335,22 @@ export class AdminSubscriptionsService {
         };
       }
 
-      monthly[month].totalUsers.add(userId);
-
-      if (price === 0 && !userHistory.has(userId)) {
-        userHistory.set(userId, sub.start_date);
+      if (!userStats.has(userId)) {
+        userStats.set(userId, { hasFree: false, converted: false });
       }
 
-      if (
-        price > 0 &&
-        userHistory.has(userId) &&
-        sub.start_date > userHistory.get(userId)!
-      ) {
-        monthly[month].convertedUsers.add(userId);
+      const stats = userStats.get(userId)!;
+
+      if (isFreeRecord) {
+        if (!stats.hasFree) {
+          stats.hasFree = true;
+          monthly[month].totalUsers.add(userId);
+        }
+      } else {
+        if (stats.hasFree && !stats.converted) {
+          stats.converted = true;
+          monthly[month].convertedUsers.add(userId);
+        }
       }
     }
 
@@ -308,6 +371,7 @@ export class AdminSubscriptionsService {
       })
       .sort((a, b) => a.month.localeCompare(b.month));
   }
+
   async getSubscriptionStatsByStatus() {
     const result = await this.prisma.user_package_subscriptions.groupBy({
       by: ['status'],

@@ -44,6 +44,7 @@ model skin_analyses {
   user            users         @relation(fields: [user_id], references: [id])
   skin_type       skin_types    @relation(fields: [skin_type_id], references: [id])
   metrics         skin_analysis_metrics[]
+  routines        user_routines[]
 }
 
 model skin_analysis_metrics {
@@ -160,7 +161,9 @@ model user_routines {
   user_package_subscription_id   String                   @db.Uuid
   routine_time                   routine_time_enum
   created_at                     DateTime                 @default(now())
+  skin_analysis_id               String? @db.Uuid
 
+  skin_analysis                  skin_analyses? @relation(fields: [skin_analysis_id], references: [id])
   subscription                   user_package_subscriptions @relation(fields: [user_package_subscription_id], references: [id])
   steps                          user_routine_steps[]
   daily_logs                     routine_daily_logs[]
@@ -241,7 +244,6 @@ enum skin_metric_enum {
   ACNE
   DARK_CIRCLES
   DARK_SPOTS
-  WRINKLES
 }
 
 enum routine_time_enum {
@@ -256,7 +258,9 @@ enum payment_status_enum {
 }
 
 enum subscription_status_enum {
+  PENDING
   ACTIVE
+  FAILED 
   EXPIRED
   CANCELED
 }
