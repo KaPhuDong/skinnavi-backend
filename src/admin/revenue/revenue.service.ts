@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { subscription_status_enum } from '@prisma/client';
 
 type GetRevenueStatsArgs = {
   from?: string;
@@ -106,7 +107,7 @@ export class AdminRevenueService {
     const subscriptions = await this.prisma.user_package_subscriptions.findMany(
       {
         where: {
-          is_active: true,
+          status: subscription_status_enum.ACTIVE,
           end_date: {
             gte: now,
           },
