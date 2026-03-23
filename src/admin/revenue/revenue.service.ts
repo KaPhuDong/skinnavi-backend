@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { subscription_status_enum } from '@prisma/client';
 
 type GetRevenueStatsArgs = {
   from?: string;
@@ -98,6 +99,49 @@ export class AdminRevenueService {
         ads: 'Not implemented yet (defaults to 0).',
         affiliate: 'Not implemented yet (defaults to 0).',
       },
+    };
+  }
+  async getMRR() {
+    const now = new Date();
+
+    const subscriptions = await this.prisma.user_package_subscriptions.findMany(
+      {
+        where: {
+          status: subscription_status_enum.ACTIVE,
+          end_date: {
+            gte: now,
+          },
+        },
+        include: {
+          routine_package: true,
+        },
+      },
+    );
+
+    let totalMRR = 0;
+
+    const breakdown = subscriptions.map((sub) => {
+      const price = Number(sub.routine_package.price);
+      const durationDays = sub.routine_package.duration_days;
+
+      const months = durationDays / 30;
+      const monthlyValue = price / months;
+
+      totalMRR += monthlyValue;
+
+      return {
+        subscriptionId: sub.id,
+        packageName: sub.routine_package.package_name,
+        monthlyValue,
+      };
+    });
+
+    return {
+      totalMRR,
+      totalActiveSubscriptions: subscriptions.length,
+      averageRevenuePerUser:
+        subscriptions.length > 0 ? totalMRR / subscriptions.length : 0,
+      breakdown,
     };
   }
 }
