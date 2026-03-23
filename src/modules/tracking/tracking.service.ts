@@ -446,7 +446,7 @@ export class TrackingService implements OnModuleInit {
       sub.routines.map((routine) => {
         const daily_logs = routine.daily_logs.map((log) => ({
           id: log.id,
-          log_date: log.log_date.toISOString().split('T')[0],
+          log_date: log.log_date.toISOString(),
           is_completed: log.is_completed,
         }));
 
@@ -526,7 +526,7 @@ export class TrackingService implements OnModuleInit {
         const logs = routine.daily_logs.map((log) => ({
           id: log.id,
           user_routine_id: log.user_routine_id,
-          log_date: log.log_date.toISOString().split('T')[0],
+          log_date: log.log_date.toISOString(),
           is_completed: log.is_completed,
           completed_at: log.completed_at
             ? log.completed_at.toISOString()
@@ -582,12 +582,12 @@ export class TrackingService implements OnModuleInit {
                 },
               },
             },
-            orderBy: { routine_time: Order.ASC },
+            orderBy: { created_at: Order.DESC },
           },
         },
       });
 
-    if (!latestSubscription) {
+    if (!latestSubscription || latestSubscription.routines.length === 0) {
       return {
         user_id: user.id,
         type: 'NO_SUBSCRIPTION',
@@ -604,30 +604,36 @@ export class TrackingService implements OnModuleInit {
       };
     }
 
-    const routines: any[] = [];
+    const latestRoutineCreatedAt = latestSubscription.routines[0].created_at;
+    const latestRoutines = latestSubscription.routines.filter((r) => {
+      const diffInSeconds =
+        Math.abs(r.created_at.getTime() - latestRoutineCreatedAt.getTime()) /
+        1000;
+      return diffInSeconds < 5;
+    });
 
-    for (const routine of latestSubscription.routines) {
+    const routinesResult: any[] = [];
+
+    for (const routine of latestRoutines) {
       const todayLog = routine.daily_logs[0];
 
       if (todayLog) {
-        routines.push({
+        routinesResult.push({
           routine_id: routine.id,
           routine_time: routine.routine_time,
           routine_created_at: routine.created_at.toISOString(),
-
           daily_log: {
             id: todayLog.id,
             user_routine_id: todayLog.user_routine_id,
-            log_date: todayLog.log_date.toISOString().split('T')[0],
+            log_date: todayLog.log_date.toISOString(),
             is_completed: todayLog.is_completed,
           },
-
           is_completed: todayLog.is_completed,
         });
       }
     }
 
-    if (routines.length === 0) {
+    if (routinesResult.length === 0) {
       return {
         user_id: user.id,
         type: 'NO_LOG_TODAY',
@@ -635,10 +641,13 @@ export class TrackingService implements OnModuleInit {
       };
     }
 
+    // Sắp xếp lại theo MORNING/EVENING để hiển thị đúng thứ tự cho user
+    routinesResult.sort((a, b) => a.routine_time.localeCompare(b.routine_time));
+
     return {
       user_id: user.id,
       type: 'HAS_LOG',
-      routines,
+      routines: routinesResult,
     };
   }
 
@@ -688,18 +697,21 @@ export class TrackingService implements OnModuleInit {
       };
     }
 
-    const analyzesWithTrend = skinAnalyses.map((current, index) => {
-      const previous = skinAnalyses[index + 1];
+    const analyzesWithTrend: any[] = [];
+
+    for (let i = 0; i < skinAnalyses.length; i++) {
+      const current = skinAnalyses[i];
+      const previous = skinAnalyses[i + 1];
       let scoreTrend: number | null = null;
 
-      if (current.overall_score !== null && previous?.overall_score !== null) {
+      if (current.overall_score && previous?.overall_score) {
         scoreTrend =
           Number(current.overall_score) - Number(previous.overall_score);
       }
 
-      return {
+      analyzesWithTrend.push({
         id: current.id,
-        skin_type_code: current.skin_type?.code || 'N/A',
+        skin_type_code: current.skin_type.code,
         overall_score: current.overall_score
           ? Number(current.overall_score)
           : null,
@@ -711,11 +723,16 @@ export class TrackingService implements OnModuleInit {
           metric_type: m.metric_type,
           score: m.score ? Number(m.score) : null,
         })),
-      };
-    });
+      });
+    }
 
     return {
-      ...baseResponse,
+      user_id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      avatar_url: user.avatar_url,
+      start_date: start.toISOString().split('T')[0],
+      end_date: end.toISOString().split('T')[0],
       skin_analyses: analyzesWithTrend,
     };
   }
