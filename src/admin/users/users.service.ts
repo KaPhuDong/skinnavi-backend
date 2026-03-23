@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import bcrypt from 'bcrypt';
+import { subscription_status_enum } from '@prisma/client';
 
 type GetUserStatsArgs = {
   activeDays: number;
@@ -93,7 +94,7 @@ export class AdminUsersService {
           created_at: true,
           user_package_subscriptions: {
             where: {
-              is_active: true,
+              status: subscription_status_enum.ACTIVE,
             },
             take: 1,
             select: {
@@ -202,7 +203,7 @@ export class AdminUsersService {
         packageName: s.routine_package.package_name,
         startDate: s.start_date,
         endDate: s.end_date,
-        isActive: s.is_active,
+        isActive: s.status,
       })),
 
       activity: {
