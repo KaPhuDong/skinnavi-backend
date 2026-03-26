@@ -9,10 +9,12 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Order } from '@Constant/index';
+import { subscription_status_enum } from '@prisma/client';
 
 @Injectable()
 export class TrackingService implements OnModuleInit {
   private readonly logger = new Logger(TrackingService.name);
+  private isCreatingLogs = false;
 
   constructor(private prisma: PrismaService) {}
 
@@ -45,21 +47,20 @@ export class TrackingService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    try {
-      this.logger.log('Checking and creating daily logs for today...');
-      await this.createDailyLogsForToday();
-      this.logger.log('Daily logs check completed');
-    } catch (error) {
-      this.logger.error('Failed to create daily logs on startup:', error);
-    }
+    await this.createDailyLogs();
+  }
+
+  private toVNTime(date: Date): Date {
+    return new Date(date.getTime() + 7 * 60 * 60 * 1000);
   }
 
   private toDateOnly(date: Date): Date {
+    const vnDate = this.toVNTime(date);
     return new Date(
       Date.UTC(
-        date.getUTCFullYear(),
-        date.getUTCMonth(),
-        date.getUTCDate(),
+        vnDate.getUTCFullYear(),
+        vnDate.getUTCMonth(),
+        vnDate.getUTCDate(),
         0,
         0,
         0,
@@ -68,244 +69,74 @@ export class TrackingService implements OnModuleInit {
     );
   }
 
-  async createAndCheckDailyLogs(): Promise<{
-    created: number;
-    checked: number;
-    logs: any[];
-  }> {
-    const now = new Date();
-    const today = this.toDateOnly(now);
-
-    const todayEnd = new Date(today);
-    todayEnd.setUTCHours(23, 59, 59, 999);
-
-    const activeRoutines = await this.prisma.user_routines.findMany({
-      where: {
-        subscription: {
-          start_date: { lte: todayEnd },
-          end_date: { gte: today },
-        },
-      },
-      include: {
-        subscription: true,
-      },
-    });
-
-    let totalCreated = 0;
-    let totalChecked = 0;
-    const allLogs: any[] = [];
-
-    for (const routine of activeRoutines) {
-      try {
-        const routineStartDate = this.toDateOnly(new Date(routine.created_at));
-
-        const subscriptionEndDate = new Date(
-          this.toDateOnly(new Date(routine.subscription.end_date)),
-        );
-        subscriptionEndDate.setUTCHours(23, 59, 59, 999);
-
-        const subStart = this.toDateOnly(
-          new Date(routine.subscription.start_date),
-        );
-
-        const startDate =
-          routineStartDate > subStart ? routineStartDate : subStart;
-
-        const endDate =
-          today < subscriptionEndDate ? today : subscriptionEndDate;
-
-        const currentDate = new Date(startDate);
-
-        while (currentDate <= endDate) {
-          const logDate = this.toDateOnly(currentDate);
-
-          const existingLog = await this.prisma.routine_daily_logs.findFirst({
-            where: {
-              user_routine_id: routine.id,
-              log_date: {
-                equals: logDate,
-              },
-            },
-          });
-
-          totalChecked++;
-
-          if (!existingLog) {
-            const newLog = await this.prisma.routine_daily_logs.create({
-              data: {
-                user_routine_id: routine.id,
-                log_date: logDate,
-                is_completed: false,
-              },
-            });
-            allLogs.push(newLog);
-            totalCreated++;
-          }
-
-          currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to create logs for routine ${routine.id}:`,
-          error,
-        );
-      }
-    }
-
-    this.logger.log(
-      `Checked ${totalChecked} logs, created ${totalCreated} new logs`,
-    );
-
-    return { created: totalCreated, checked: totalChecked, logs: allLogs };
-  }
-
-  private async createDailyLogsForToday() {
-    const now = new Date();
-    const today = new Date(now);
-    today.setUTCHours(0, 0, 0, 0);
-
-    const todayEnd = new Date(now);
-    todayEnd.setUTCHours(23, 59, 59, 999);
-
-    const activeRoutines = await this.prisma.user_routines.findMany({
-      where: {
-        subscription: {
-          start_date: { lte: todayEnd },
-          end_date: { gte: today },
-          status: { in: ['ACTIVE', 'CANCELED'] },
-        },
-      },
-      select: { id: true },
-    });
-
-    if (activeRoutines.length === 0) {
-      return { created: 0, message: 'No active routines found for today' };
-    }
-
-    const existingLogs = await this.prisma.routine_daily_logs.findMany({
-      where: {
-        log_date: today,
-        user_routine_id: { in: activeRoutines.map((r) => r.id) },
-      },
-      select: { user_routine_id: true },
-    });
-
-    const existingRoutineIds = new Set(
-      existingLogs.map((l) => l.user_routine_id),
-    );
-
-    const routinesToCreate = activeRoutines
-      .filter((r) => !existingRoutineIds.has(r.id))
-      .map((r) => ({
-        user_routine_id: r.id,
-        log_date: today,
-        is_completed: false,
-      }));
-
-    if (routinesToCreate.length === 0) {
-      return { created: 0, message: 'All logs already exist' };
-    }
-
-    const result = await this.prisma.routine_daily_logs.createMany({
-      data: routinesToCreate,
-      skipDuplicates: true,
-    });
-
-    this.logger.log(
-      `[CRON] Created ${result.count} daily logs for ${today.toISOString().split('T')[0]}`,
-    );
-    return { created: result.count };
-  }
-
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async createDailyLogs() {
-    const now = new Date();
-    const today = this.toDateOnly(now);
-
-    const todayEnd = new Date(today);
-    todayEnd.setUTCHours(23, 59, 59, 999);
-
-    const latestSubscriptions =
-      await this.prisma.user_package_subscriptions.findMany({
-        where: {
-          status: 'ACTIVE',
-          routine_package: {
-            duration_days: {
-              in: [30, 90],
-            },
-          },
-          start_date: { lte: todayEnd },
-          end_date: { gte: today },
-        },
-        orderBy: {
-          created_at: 'desc',
-        },
-        include: {
-          routine_package: true,
-          routines: true,
-        },
-        distinct: ['user_id'],
-      });
-
-    const results: any[] = [];
-
-    for (const subscription of latestSubscriptions) {
-      for (const routine of subscription.routines) {
-        try {
-          const routineStartDate = this.toDateOnly(
-            new Date(routine.created_at),
-          );
-
-          const subscriptionEndDate = new Date(
-            this.toDateOnly(new Date(subscription.end_date)),
-          );
-          subscriptionEndDate.setUTCHours(23, 59, 59, 999);
-
-          const subStart = this.toDateOnly(new Date(subscription.start_date));
-
-          const startDate =
-            routineStartDate > subStart ? routineStartDate : subStart;
-
-          const endDate =
-            today < subscriptionEndDate ? today : subscriptionEndDate;
-
-          const currentDate = new Date(startDate);
-
-          while (currentDate <= endDate) {
-            const logDate = this.toDateOnly(currentDate);
-
-            const existingLog = await this.prisma.routine_daily_logs.findFirst({
-              where: {
-                user_routine_id: routine.id,
-                log_date: {
-                  equals: logDate,
-                },
-              },
-            });
-
-            if (!existingLog) {
-              const newLog = await this.prisma.routine_daily_logs.create({
-                data: {
-                  user_routine_id: routine.id,
-                  log_date: logDate,
-                  is_completed: false,
-                },
-              });
-              results.push(newLog);
-            }
-
-            currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-          }
-        } catch (error) {
-          this.logger.error(
-            `Failed to create logs for routine ${routine.id}:`,
-            error,
-          );
-        }
-      }
+    if (this.isCreatingLogs) {
+      this.logger.warn(
+        '[CRON] A log creation process is already in progress. Skipping...',
+      );
+      return { created: 0 };
     }
 
-    return { created: results.length, logs: results };
+    this.isCreatingLogs = true;
+    try {
+      const now = new Date();
+      const today = this.toDateOnly(now);
+      const activeRoutines = await this.prisma.user_routines.findMany({
+        where: {
+          subscription: {
+            status: subscription_status_enum.ACTIVE,
+            routine_package: {
+              duration_days: { in: [30, 90] },
+            },
+            start_date: { lte: now },
+            end_date: { gte: now },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (activeRoutines.length === 0) {
+        return { created: 0, message: 'No active routines found for today' };
+      }
+
+      const existingLogs = await this.prisma.routine_daily_logs.findMany({
+        where: {
+          log_date: today,
+          user_routine_id: { in: activeRoutines.map((r) => r.id) },
+        },
+        select: { user_routine_id: true },
+      });
+
+      const existingIds = new Set(existingLogs.map((l) => l.user_routine_id));
+
+      const routinesToCreate = activeRoutines
+        .filter((r) => !existingIds.has(r.id))
+        .map((r) => ({
+          user_routine_id: r.id,
+          log_date: today,
+          is_completed: false,
+        }));
+
+      if (routinesToCreate.length === 0) {
+        return { created: 0, message: 'All logs already exist' };
+      }
+
+      const result = await this.prisma.routine_daily_logs.createMany({
+        data: routinesToCreate,
+      });
+
+      this.logger.log(
+        `[CRON] Successfully created ${result.count} daily logs for ${today.toISOString().split('T')[0]}`,
+      );
+
+      return { created: result.count };
+    } catch (error) {
+      this.logger.error('Error during daily log creation:', error);
+      throw error;
+    } finally {
+      this.isCreatingLogs = false;
+    }
   }
 
   async updateDailyLog(logId: string, is_completed: boolean) {
@@ -316,41 +147,34 @@ export class TrackingService implements OnModuleInit {
 
     if (!log) throw new NotFoundException('Daily log not found');
 
-    const now = new Date();
+    const nowRaw = new Date();
+    const nowVN = this.toVNTime(nowRaw);
 
     if (is_completed) {
       const routineTime = log.user_routine.routine_time;
-
       const logDate = new Date(log.log_date);
-      const logYear = logDate.getUTCFullYear();
-      const logMonth = logDate.getUTCMonth();
-      const logDay = logDate.getUTCDate();
 
       const isSameDay =
-        now.getUTCFullYear() === logYear &&
-        now.getUTCMonth() === logMonth &&
-        now.getUTCDate() === logDay;
+        nowVN.getUTCFullYear() === logDate.getUTCFullYear() &&
+        nowVN.getUTCMonth() === logDate.getUTCMonth() &&
+        nowVN.getUTCDate() === logDate.getUTCDate();
 
       if (!isSameDay) {
         throw new BadRequestException(
-          `This log is for ${logYear}-${logMonth + 1}-${logDay}. You can only check-in for today.`,
+          `You can only check-in for today (${logDate.getUTCDate()}/${logDate.getUTCMonth() + 1}).`,
         );
       }
 
-      const morningEnd = new Date(now);
-      morningEnd.setUTCHours(12, 0, 0, 0);
-
-      const eveningStart = new Date(now);
-      eveningStart.setUTCHours(12, 0, 0, 0);
+      const vnHour = nowVN.getUTCHours();
 
       if (routineTime === 'MORNING') {
-        if (now >= morningEnd) {
+        if (vnHour >= 12) {
           throw new BadRequestException(
             'Morning routine expired (Deadline: 12:00 PM)',
           );
         }
       } else if (routineTime === 'EVENING') {
-        if (now < eveningStart) {
+        if (vnHour < 12) {
           throw new BadRequestException(
             'Evening routine has not started yet (Starts at 12:00 PM)',
           );
@@ -362,7 +186,7 @@ export class TrackingService implements OnModuleInit {
       where: { id: logId },
       data: {
         is_completed,
-        completed_at: is_completed ? now : null,
+        completed_at: is_completed ? nowRaw : null,
       },
     });
   }

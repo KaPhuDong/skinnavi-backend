@@ -76,6 +76,25 @@ export class RoutinesService {
     );
   }
 
+  private toVNTime(date: Date): Date {
+    return new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  }
+
+  private toDateOnly(date: Date): Date {
+    const vnDate = this.toVNTime(date);
+    return new Date(
+      Date.UTC(
+        vnDate.getUTCFullYear(),
+        vnDate.getUTCMonth(),
+        vnDate.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+  }
+
   async createRoutine(params: {
     userId: string;
     skinAnalysisId: string;
@@ -185,6 +204,7 @@ export class RoutinesService {
     }
 
     const validProductIds = combo.combo_products.map((cp) => cp.product.id);
+    const normalizedNow = this.toDateOnly(new Date());
 
     const saveRoutine = async (time: 'MORNING' | 'EVENING', steps: any[]) => {
       const routine = await this.prisma.user_routines.create({
@@ -192,6 +212,7 @@ export class RoutinesService {
           user_package_subscription_id: subscription.id,
           routine_time: time,
           skin_analysis_id: skinAnalysisId,
+          created_at: normalizedNow,
         },
       });
 
