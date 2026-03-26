@@ -31,19 +31,6 @@ export class TrackingController {
     return new SimpleResponse(data, 'Daily logs created successfully', 201);
   }
 
-  @Post('daily-logs/check-all')
-  async createAndCheckDailyLogs(
-    @GetUser('id') userId: string,
-  ): Promise<SimpleResponse<any>> {
-    await this.trackingService.validateTrackingAccess(userId);
-    const data = await this.trackingService.createAndCheckDailyLogs();
-    return new SimpleResponse(
-      data,
-      'Daily logs checked and created successfully',
-      201,
-    );
-  }
-
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('')
   @Patch('daily-logs/:id')
