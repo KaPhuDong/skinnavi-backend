@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Order } from '@Constant/enums';
 
 @Injectable()
 export class ProductsService {
@@ -16,7 +17,7 @@ export class ProductsService {
       this.prisma.affiliate_products.findMany({
         skip,
         take: limit,
-        orderBy: { id: 'desc' },
+        orderBy: { created_at: Order.DESC },
       }),
       this.prisma.affiliate_products.count(),
     ]);
@@ -103,7 +104,6 @@ export class ProductsService {
     const to =
       params?.to && params.to.trim() !== '' ? new Date(params.to) : undefined;
 
-    // validate
     if (from && Number.isNaN(from.getTime())) {
       throw new BadRequestException('Invalid "from" date');
     }
@@ -132,7 +132,7 @@ export class ProductsService {
         created_at: true,
       },
       orderBy: {
-        created_at: 'asc',
+        created_at: Order.ASC,
       },
     });
 
