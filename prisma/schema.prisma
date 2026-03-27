@@ -164,6 +164,7 @@ model user_routines {
   routine_time                   routine_time_enum
   created_at                     DateTime                 @default(now())
   skin_analysis_id               String? @db.Uuid
+  is_active                      Boolean                  @default(true)
 
   skin_analysis                  skin_analyses? @relation(fields: [skin_analysis_id], references: [id])
   subscription                   user_package_subscriptions @relation(fields: [user_package_subscription_id], references: [id])
