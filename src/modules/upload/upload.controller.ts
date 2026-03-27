@@ -62,7 +62,7 @@ export class UploadController {
 
     return new SimpleResponse(
       { url: result.url, publicId: result.publicId },
-      'Image uploaded to Drive successfully.',
+      'Image uploaded to Cloudinary successfully.',
       201,
     );
   }
