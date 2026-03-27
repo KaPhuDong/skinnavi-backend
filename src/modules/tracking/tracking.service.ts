@@ -84,6 +84,7 @@ export class TrackingService implements OnModuleInit {
       const today = this.toDateOnly(now);
       const activeRoutines = await this.prisma.user_routines.findMany({
         where: {
+          is_active: true,
           subscription: {
             status: subscription_status_enum.ACTIVE,
             routine_package: {
