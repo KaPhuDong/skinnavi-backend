@@ -24,6 +24,13 @@ export class PackageSubscriptionsService {
     const latestSub = await this.prisma.user_package_subscriptions.findFirst({
       where: {
         user_id: userId,
+        status: {
+          in: [
+            subscription_status_enum.ACTIVE,
+            subscription_status_enum.CANCELED,
+            subscription_status_enum.EXPIRED,
+          ],
+        },
       },
       orderBy: {
         created_at: Order.DESC,
